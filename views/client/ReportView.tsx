@@ -1,13 +1,14 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { Client } from '../../types';
 import { AnalysisView } from './AnalysisView';
 import { ProjectionView } from './ProjectionView';
-import { Printer, TrendingUp, Building2, CalendarDays } from 'lucide-react';
+import { Printer, TrendingUp, UserCheck } from 'lucide-react';
 import { DebtsView } from './DebtsView';
 
 export const ReportView = () => {
   const { client } = useOutletContext<{ client: Client }>();
+  const [consultantName, setConsultantName] = useState('Rodrigo Cruz');
 
   const handlePrint = () => {
     window.print();
@@ -19,7 +20,19 @@ export const ReportView = () => {
       <div className="mb-8 flex justify-between items-center bg-white p-6 rounded-xl border border-slate-200 shadow-sm print:hidden">
         <div>
           <h2 className="font-bold text-slate-900 text-lg">Relatório Executivo (A4)</h2>
-          <p className="text-slate-500 text-sm mt-1">Diagramação otimizada para impressão.</p>
+          <p className="text-slate-500 text-sm mt-1">Personalize e imprima o diagnóstico.</p>
+          <div className="mt-4 flex items-center gap-2">
+            <label className="text-xs font-bold uppercase text-slate-500">Consultor Responsável:</label>
+            <div className="flex items-center gap-2 border border-slate-300 rounded px-3 py-1 bg-white">
+                <UserCheck size={14} className="text-slate-400" />
+                <input 
+                    type="text" 
+                    value={consultantName} 
+                    onChange={e => setConsultantName(e.target.value)}
+                    className="text-sm font-medium text-slate-800 outline-none"
+                />
+            </div>
+          </div>
         </div>
         <button 
           onClick={handlePrint}
@@ -47,10 +60,10 @@ export const ReportView = () => {
             </div>
             <div className="text-right">
               <h2 className="text-xl font-bold text-slate-900 leading-tight">{client.name}</h2>
-              <div className="flex items-center justify-end gap-2 text-slate-500 text-xs mt-1 font-mono">
-                <span>{client.sector}</span>
-                <span>•</span>
-                <span>{new Date().toLocaleDateString('pt-BR')}</span>
+              <div className="flex flex-col items-end gap-1 mt-1">
+                <span className="text-slate-500 text-xs font-mono">{client.sector} • CNPJ: {client.cnpj}</span>
+                <span className="text-slate-500 text-xs font-mono">Consultor: {consultantName}</span>
+                <span className="text-slate-400 text-[10px] font-mono mt-1">Gerado em: {new Date().toLocaleString('pt-BR')}</span>
               </div>
             </div>
           </div>
@@ -95,7 +108,7 @@ export const ReportView = () => {
         {/* Footer */}
         <footer className="mt-12 pt-6 border-t border-slate-200 text-center">
           <p className="text-[10px] text-slate-400 font-mono uppercase tracking-widest mb-1">
-            Relatório gerado automaticamente pelo sistema Mapa do Sufoco
+            Resultados baseados nos dados importados. Não constituem garantia de performance futura.
           </p>
           <p className="text-[10px] text-slate-300 font-mono">
              Confidencial • {client.name} • {new Date().getFullYear()}

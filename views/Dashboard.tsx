@@ -1,13 +1,32 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useData } from '../context/DataContext';
-import { Plus, Search, Building2, ChevronRight, AlertOctagon, CheckCircle2, X, Briefcase, User, Hash, Wallet, BadgeCheck } from 'lucide-react';
-import { Client } from '../types';
+import { Plus, Search, Building2, ChevronRight, AlertOctagon, CheckCircle2, X, Briefcase, User, Hash, BadgeCheck, Trash2, Database, PlayCircle } from 'lucide-react';
+import { Client, ClientStatus } from '../types';
+
+const StatusBadge = ({ status }: { status: ClientStatus }) => {
+  const map = {
+    'SEM_DADOS': { label: 'Novo', color: 'bg-slate-100 text-slate-500' },
+    'IMPORTADO': { label: 'Importado', color: 'bg-blue-50 text-blue-600 border-blue-100' },
+    'CLASSIFICADO': { label: 'Classificado', color: 'bg-indigo-50 text-indigo-600 border-indigo-100' },
+    'DIVIDAS_PREENCHIDAS': { label: 'Dívidas OK', color: 'bg-amber-50 text-amber-600 border-amber-100' },
+    'PROJECAO_CONCLUIDA': { label: 'Concluído', color: 'bg-emerald-50 text-emerald-600 border-emerald-100' },
+  };
+
+  const config = map[status] || map['SEM_DADOS'];
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border uppercase tracking-wide ${config.color} ${status !== 'SEM_DADOS' ? 'border' : 'border-slate-200'}`}>
+      {config.label}
+    </span>
+  );
+}
 
 export const Dashboard = () => {
-  const { clients, addClient } = useData();
+  const { clients, addClient, resetApplication, loadDemoData } = useData();
   const navigate = useNavigate();
   const [showNewClientModal, setShowNewClientModal] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
   
   // Form States
   const [formData, setFormData] = useState({
@@ -39,7 +58,8 @@ export const Dashboard = () => {
       cnpj: formData.cnpj,
       contactName: formData.contactName,
       contactRole: finalRole || 'Não Informado',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      status: 'SEM_DADOS'
     };
     addClient(newClient);
     
@@ -58,21 +78,44 @@ export const Dashboard = () => {
     navigate(`/client/${newClient.id}`);
   };
 
+  const handleReset = () => {
+    if (window.confirm("ATENÇÃO: Isso apagará TODOS os clientes e dados locais. Tem certeza?")) {
+      resetApplication();
+    }
+  };
+
+  const filteredClients = clients.filter(c => 
+    c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    c.cnpj.includes(searchTerm) || 
+    c.sector.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
-    <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in duration-500">
+    <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in duration-500 pb-20">
       {/* Header */}
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-200 pb-6">
         <div>
           <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Carteira de Clientes</h1>
           <p className="text-slate-500 mt-2 text-lg font-light">Gestão de diagnósticos e monitoramento de risco de caixa.</p>
         </div>
-        <button 
-          onClick={() => setShowNewClientModal(true)}
-          className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-3 rounded-lg flex items-center gap-2 transition-all shadow-lg hover:shadow-xl font-medium tracking-wide"
-        >
-          <Plus size={20} />
-          Novo Cliente
-        </button>
+        <div className="flex gap-3">
+          {clients.length === 0 && (
+             <button 
+              onClick={loadDemoData}
+              className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-3 rounded-lg flex items-center gap-2 transition-all shadow-sm font-medium text-sm"
+            >
+              <PlayCircle size={18} />
+              Carregar Demo
+            </button>
+          )}
+          <button 
+            onClick={() => setShowNewClientModal(true)}
+            className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-3 rounded-lg flex items-center gap-2 transition-all shadow-lg hover:shadow-xl font-medium tracking-wide"
+          >
+            <Plus size={20} />
+            Novo Cliente
+          </button>
+        </div>
       </header>
 
       {/* KPI Cards */}
@@ -88,8 +131,8 @@ export const Dashboard = () => {
         </div>
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-start justify-between hover:shadow-md transition-shadow">
           <div>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Diagnósticos (Mês)</p>
-            <p className="text-3xl font-bold text-slate-900 mt-2">12</p>
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Concluídos</p>
+            <p className="text-3xl font-bold text-slate-900 mt-2">{clients.filter(c => c.status === 'PROJECAO_CONCLUIDA').length}</p>
           </div>
           <div className="p-3 bg-teal-50 text-teal-600 rounded-lg border border-teal-100">
             <Briefcase size={24} />
@@ -97,10 +140,10 @@ export const Dashboard = () => {
         </div>
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-start justify-between hover:shadow-md transition-shadow">
           <div>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Risco Crítico</p>
-            <p className="text-3xl font-bold text-rose-600 mt-2">2</p>
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Em Processo</p>
+            <p className="text-3xl font-bold text-indigo-600 mt-2">{clients.filter(c => c.status !== 'PROJECAO_CONCLUIDA').length}</p>
           </div>
-          <div className="p-3 bg-rose-50 text-rose-600 rounded-lg border border-rose-100">
+          <div className="p-3 bg-indigo-50 text-indigo-600 rounded-lg border border-indigo-100">
             <AlertOctagon size={24} />
           </div>
         </div>
@@ -111,6 +154,8 @@ export const Dashboard = () => {
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-teal-600 transition-colors" size={20} />
         <input 
           type="text" 
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
           placeholder="Filtrar por nome, CNPJ ou setor..." 
           className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-700 shadow-sm transition-all"
         />
@@ -123,14 +168,13 @@ export const Dashboard = () => {
             <tr>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Empresa</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Setor / CNPJ</th>
-              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Status</th>
-              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Última Análise</th>
-              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Risco</th>
+              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Status Funil</th>
+              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Data Cadastro</th>
               <th className="px-6 py-4"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {clients.map((client, idx) => (
+            {filteredClients.map((client, idx) => (
               <tr 
                 key={client.id} 
                 onClick={() => navigate(`/client/${client.id}`)}
@@ -156,23 +200,10 @@ export const Dashboard = () => {
                   </div>
                 </td>
                 <td className="px-6 py-5">
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200 uppercase tracking-wide">
-                    Em Progresso
-                  </span>
+                  <StatusBadge status={client.status} />
                 </td>
                 <td className="px-6 py-5 text-sm text-slate-500 font-mono">
                   {new Date(client.createdAt).toLocaleDateString('pt-BR')}
-                </td>
-                <td className="px-6 py-5">
-                  {idx % 2 === 0 ? (
-                    <div className="flex items-center gap-2 text-rose-700 text-xs font-bold bg-rose-50 px-3 py-1.5 rounded-md w-fit border border-rose-100 uppercase tracking-wide">
-                      <AlertOctagon size={14} /> ALTO
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2 text-emerald-700 text-xs font-bold bg-emerald-50 px-3 py-1.5 rounded-md w-fit border border-emerald-100 uppercase tracking-wide">
-                      <CheckCircle2 size={14} /> BAIXO
-                    </div>
-                  )}
                 </td>
                 <td className="px-6 py-5 text-right">
                   <div className="w-8 h-8 rounded-full bg-transparent group-hover:bg-white group-hover:shadow-sm flex items-center justify-center text-slate-300 group-hover:text-teal-600 transition-all ml-auto">
@@ -190,21 +221,39 @@ export const Dashboard = () => {
             </div>
             <p className="text-lg font-medium text-slate-600">Sua carteira está vazia.</p>
             <p className="text-sm mt-1 mb-6">Cadastre o primeiro cliente para iniciar um diagnóstico.</p>
-            <button 
-              onClick={() => setShowNewClientModal(true)}
-              className="text-teal-600 font-bold hover:text-teal-700 hover:underline"
-            >
-              Cadastrar agora
-            </button>
+            <div className="flex gap-4">
+              <button 
+                onClick={loadDemoData}
+                className="text-slate-500 font-bold hover:text-slate-700 hover:underline text-sm"
+              >
+                Carregar Dados Demo
+              </button>
+              <button 
+                onClick={() => setShowNewClientModal(true)}
+                className="text-teal-600 font-bold hover:text-teal-700 hover:underline text-sm"
+              >
+                Cadastrar agora
+              </button>
+            </div>
           </div>
         )}
       </div>
+
+      {clients.length > 0 && (
+        <div className="flex justify-center mt-12">
+          <button 
+            onClick={handleReset}
+            className="text-rose-500 hover:text-rose-700 text-xs font-bold uppercase tracking-wider flex items-center gap-2 hover:bg-rose-50 px-4 py-2 rounded transition-colors"
+          >
+            <Trash2 size={14} /> Resetar Base de Dados Local
+          </button>
+        </div>
+      )}
 
       {/* Enhanced Modal */}
       {showNewClientModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
-            
             {/* Modal Header */}
             <div className="px-8 py-6 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
               <div>

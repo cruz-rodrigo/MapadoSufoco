@@ -1,37 +1,57 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { Client } from '../../types';
 import { useData } from '../../context/DataContext';
 import { formatCurrency } from '../../constants';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, AreaChart, Area } from 'recharts';
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, AreaChart, Area } from 'recharts';
 import { ShieldCheck, AlertOctagon, ShieldAlert, TrendingUp, Info } from 'lucide-react';
 
 export const ProjectionView = () => {
   const { client } = useOutletContext<{ client: Client }>();
-  const { getTransactionsByClient, getDebtsByClient } = useData();
+  // Use raw data arrays for stable memoization
+  const { transactions: allTransactions, debts: allDebts, updateClientStatus } = useData();
 
-  const transactions = getTransactionsByClient(client.id);
-  const debts = getDebtsByClient(client.id);
+  // Stable transaction list
+  const transactions = useMemo(() => 
+    allTransactions
+      .filter(t => t.clientId === client.id)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+  [allTransactions, client.id]);
+
+  // Stable debt list
+  const debts = useMemo(() => 
+    allDebts.filter(d => d.clientId === client.id),
+  [allDebts, client.id]);
 
   // Projection Logic
   const projection = useMemo(() => {
-    // 1. Calculate Daily Burn/Gain Avg over last 90 days
-    const totalNet = transactions.reduce((acc, t) => acc + (t.type === 'IN' ? t.value : -t.value), 0);
-    const dailyAvg = totalNet / 90;
+    // 1. Calculate History Range (Real days)
+    if (transactions.length === 0) return null;
 
-    // 2. Identify Fixed Monthly Debt Costs
+    const dates = transactions.map(t => new Date(t.date).getTime());
+    const minDate = Math.min(...dates);
+    const maxDate = Math.max(...dates);
+    const historyDays = Math.max(1, Math.ceil((maxDate - minDate) / (1000 * 60 * 60 * 24)) + 1);
+
+    // 2. Calculate Daily Net Average
+    const totalNet = transactions.reduce((acc, t) => acc + (t.type === 'IN' ? t.value : -t.value), 0);
+    const dailyAvgCashGen = totalNet / historyDays;
+
+    // 3. Identify Fixed Monthly Debt Costs
     const monthlyDebtCost = debts.reduce((acc, d) => acc + (d.monthlyPayment || 0), 0);
     const dailyDebtCost = monthlyDebtCost / 30;
 
-    // 3. Adjusted Daily Result (Historical Avg - Debt Obligations)
-    const effectiveDailyChange = dailyAvg - dailyDebtCost;
+    // 4. Adjusted Daily Result
+    const effectiveDailyChange = dailyAvgCashGen - dailyDebtCost;
 
-    // 4. Simulate
+    // 5. Simulate 30 Days
+    // Start Balance: For v1, we use max(10000, totalNet) as a starting proxy if real balance isn't tracked
     let currentBalance = Math.max(10000, totalNet); 
     
     const days = [];
     let lowestBalance = currentBalance;
     const today = new Date();
+    let ruptureDate = null;
 
     for (let i = 1; i <= 30; i++) {
       currentBalance += effectiveDailyChange;
@@ -39,6 +59,10 @@ export const ProjectionView = () => {
       const date = new Date(today);
       date.setDate(date.getDate() + i);
       
+      if (currentBalance < 0 && !ruptureDate) {
+        ruptureDate = date.toLocaleDateString('pt-BR');
+      }
+
       if (currentBalance < lowestBalance) lowestBalance = currentBalance;
 
       days.push({
@@ -50,11 +74,20 @@ export const ProjectionView = () => {
 
     // Risk Assessment
     let riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' = 'LOW';
-    if (lowestBalance < 0) riskLevel = 'HIGH';
+    if (ruptureDate) riskLevel = 'HIGH';
     else if (lowestBalance < (monthlyDebtCost * 1.5)) riskLevel = 'MEDIUM'; 
 
-    return { days, riskLevel, lowestBalance, effectiveDailyChange };
+    return { days, riskLevel, lowestBalance, effectiveDailyChange, ruptureDate, historyDays };
   }, [transactions, debts]);
+
+  // Update Status effect - SAFEGUARDED
+  useEffect(() => {
+    if (projection && client.status !== 'PROJECAO_CONCLUIDA') {
+        updateClientStatus(client.id, 'PROJECAO_CONCLUIDA');
+    }
+  }, [client.id, client.status, projection, updateClientStatus]);
+
+  if (!projection) return <div className="p-10 text-center text-slate-500">Sem dados suficientes para projeção.</div>;
 
   const riskColor = {
     LOW: 'text-emerald-800 bg-emerald-50 border-emerald-200',
@@ -76,8 +109,8 @@ export const ProjectionView = () => {
          <div>
            <p className="font-bold">Metodologia de Projeção Linear (30 Dias)</p>
            <p className="opacity-90 mt-1">
-             O cálculo utiliza a média diária de geração de caixa dos últimos 90 dias, subtraindo o custo diário fixo das dívidas cadastradas. 
-             Assume-se que o comportamento histórico de receitas e despesas se manterá estável no próximo mês.
+             Baseado em {projection.historyDays} dias de histórico importado. <br/>
+             Variação Diária Projetada: <span className="font-mono font-bold">{formatCurrency(projection.effectiveDailyChange)}/dia</span> (Geração Operacional - Serviço da Dívida).
            </p>
          </div>
        </div>
@@ -92,10 +125,12 @@ export const ProjectionView = () => {
              <h2 className="text-xl font-bold mb-1">
                Risco de Caixa: {projection.riskLevel === 'HIGH' ? 'ALTO' : projection.riskLevel === 'MEDIUM' ? 'MÉDIO' : 'BAIXO'}
              </h2>
-             <p className="opacity-90 max-w-xl text-sm leading-relaxed">
+             <p className="opacity-90 max-w-xl text-sm leading-relaxed font-medium">
                {projection.riskLevel === 'HIGH' 
-                 ? 'A projeção linear indica ruptura de caixa nos próximos 30 dias se o padrão de gastos se mantiver.' 
-                 : 'O caixa se mantém positivo, mas requer monitoramento semanal dos compromissos fixos.'}
+                 ? `ATENÇÃO: Ruptura de caixa (Dia do Sufoco) projetada para ${projection.ruptureDate}.` 
+                 : projection.riskLevel === 'MEDIUM'
+                 ? 'O caixa termina positivo, mas com margem apertada em relação ao custo da dívida.'
+                 : 'O caixa apresenta tendência saudável e cobre as obrigações financeiras.'}
              </p>
            </div>
          </div>
@@ -180,6 +215,7 @@ export const ProjectionView = () => {
                  fill="url(#colorBalance)" 
                  strokeWidth={2.5}
                  activeDot={{ r: 6, strokeWidth: 0 }}
+                 isAnimationActive={false}
                />
              </AreaChart>
            </ResponsiveContainer>

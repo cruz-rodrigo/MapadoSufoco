@@ -23,6 +23,8 @@ export enum Category {
   UNCATEGORIZED = 'A Classificar'
 }
 
+export type ClientStatus = 'SEM_DADOS' | 'IMPORTADO' | 'CLASSIFICADO' | 'DIVIDAS_PREENCHIDAS' | 'PROJECAO_CONCLUIDA';
+
 export interface Client {
   id: string;
   name: string;
@@ -31,6 +33,7 @@ export interface Client {
   contactName: string;
   contactRole?: string;
   createdAt: string;
+  status: ClientStatus;
 }
 
 export interface Transaction {

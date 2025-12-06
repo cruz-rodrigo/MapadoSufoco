@@ -45,7 +45,8 @@ export const generateMockClients = (): Client[] => [
     cnpj: '12.345.678/0001-90',
     contactName: 'Sr. Roberto',
     contactRole: 'Sócio Proprietário',
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    status: 'PROJECAO_CONCLUIDA'
   },
   {
     id: '2',
@@ -54,7 +55,8 @@ export const generateMockClients = (): Client[] => [
     cnpj: '98.765.432/0001-10',
     contactName: 'Dona Maria',
     contactRole: 'Diretora Financeira',
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    status: 'PROJECAO_CONCLUIDA'
   }
 ];
 
