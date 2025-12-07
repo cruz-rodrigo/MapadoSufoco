@@ -3,7 +3,7 @@ import { useOutletContext, useNavigate } from 'react-router-dom';
 import { Client } from '../../types';
 import { useData } from '../../context/DataContext';
 import { formatCurrency } from '../../constants';
-import { PieChart, Upload, ArrowRight, ShieldAlert, CreditCard, TrendingUp, TrendingDown, FileText, CalendarDays } from 'lucide-react';
+import { PieChart, Upload, ArrowRight, ShieldAlert, CreditCard, TrendingUp, TrendingDown, FileText, CalendarDays, Activity } from 'lucide-react';
 
 export const Overview = () => {
   const { client } = useOutletContext<{ client: Client }>();
@@ -35,32 +35,37 @@ export const Overview = () => {
 
   // Determine Risk Level (Simple Mock Logic)
   const riskLevel = stats.net < 0 ? 'ALTO' : stats.net < 10000 ? 'MÉDIO' : 'BAIXO';
-  const riskColors = {
-    'ALTO': 'bg-rose-50 text-rose-700 border-rose-200',
-    'MÉDIO': 'bg-amber-50 text-amber-700 border-amber-200',
-    'BAIXO': 'bg-emerald-50 text-emerald-700 border-emerald-200'
+  const riskConfig = {
+    'ALTO': { color: 'bg-[#fef2f2] text-rose-900 border-rose-100', iconColor: 'text-rose-600', desc: 'Atenção Crítica Necessária' },
+    'MÉDIO': { color: 'bg-[#fffbeb] text-amber-900 border-amber-100', iconColor: 'text-amber-600', desc: 'Requer Monitoramento' },
+    'BAIXO': { color: 'bg-[#ecfdf5] text-emerald-900 border-emerald-100', iconColor: 'text-emerald-600', desc: 'Situação Estável' }
   }[riskLevel];
 
   const hasData = transactions.length > 0;
 
   return (
-    <div className="space-y-8">
-      {/* Top Banner Status */}
-      <div className={`p-6 rounded-xl border flex items-center justify-between ${riskColors} shadow-sm`}>
-        <div className="flex items-center gap-4">
-          <div className="p-3 bg-white/60 rounded-full backdrop-blur-sm">
-             <ShieldAlert size={28} />
+    <div className="space-y-8 pb-10">
+      {/* Top Banner Status - Financial Style */}
+      <div className={`p-8 rounded-xl border flex items-center justify-between ${riskConfig.color} shadow-sm relative overflow-hidden`}>
+        <div className="absolute right-0 top-0 opacity-5 pointer-events-none transform translate-x-10 -translate-y-5">
+            <Activity size={200} />
+        </div>
+        
+        <div className="flex items-center gap-6 relative z-10">
+          <div className={`p-4 bg-white/80 rounded-full backdrop-blur-sm shadow-sm ${riskConfig.iconColor}`}>
+             <ShieldAlert size={32} />
           </div>
           <div>
-            <p className="text-xs font-bold uppercase tracking-wider opacity-80">Nível de Risco Calculado</p>
-            <h2 className="text-2xl font-bold">{riskLevel}</h2>
+            <p className="text-[11px] font-bold uppercase tracking-[0.2em] opacity-80 mb-1">Classificação de Risco de Caixa</p>
+            <h2 className="text-3xl font-serif font-bold tracking-tight">{riskLevel}</h2>
+            <p className="text-sm font-medium opacity-80 mt-1">{riskConfig.desc}</p>
           </div>
         </div>
-        <div className="text-right hidden md:block">
-          <p className="text-sm font-medium">Baseado em {transactions.length} transações analisadas</p>
-          <div className="flex items-center justify-end gap-1 text-xs opacity-75 mt-0.5">
-             <CalendarDays size={12} />
-             <span>Período de {stats.daysRange} dias detectado</span>
+        <div className="text-right hidden md:block relative z-10">
+          <p className="text-lg font-serif font-bold">{transactions.length} Lançamentos</p>
+          <div className="flex items-center justify-end gap-2 text-xs opacity-70 mt-1 uppercase tracking-wider font-bold">
+             <CalendarDays size={14} />
+             <span>Histórico de {stats.daysRange} dias</span>
           </div>
         </div>
       </div>
@@ -69,48 +74,55 @@ export const Overview = () => {
         
         {/* Left Column: Financial Summary */}
         <div className="lg:col-span-2 space-y-6">
-          <div className="flex items-center justify-between">
-             <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-               <TrendingUp size={20} className="text-slate-500" />
-               Resumo Financeiro
+          <div className="flex items-center justify-between border-b border-slate-200 pb-4">
+             <h3 className="text-xl font-serif font-bold text-slate-900 flex items-center gap-3">
+               <TrendingUp size={24} className="text-slate-400" />
+               Performance Financeira
              </h3>
              {hasData && (
-               <span className="text-xs font-bold bg-slate-100 text-slate-500 px-2 py-1 rounded border border-slate-200">
-                 Base: {stats.daysRange} Dias de Histórico
+               <span className="text-[10px] font-bold bg-slate-100 text-slate-500 px-3 py-1 rounded-full border border-slate-200 uppercase tracking-widest">
+                 Base Realizada
                </span>
              )}
           </div>
           
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
              {/* Cards */}
-             <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                <p className="text-sm font-medium text-slate-500 mb-1">Entradas Totais</p>
-                <p className="text-2xl font-bold text-emerald-600">{formatCurrency(stats.totalIn)}</p>
+             <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)] hover:border-emerald-200 transition-colors group">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Entradas
+                </p>
+                <p className="text-3xl font-serif font-bold text-slate-900 group-hover:text-emerald-700 transition-colors">{formatCurrency(stats.totalIn)}</p>
              </div>
-             <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                <p className="text-sm font-medium text-slate-500 mb-1">Saídas Totais</p>
-                <p className="text-2xl font-bold text-rose-600">{formatCurrency(stats.totalOut)}</p>
+             
+             <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)] hover:border-rose-200 transition-colors group">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-rose-500"></span> Saídas
+                </p>
+                <p className="text-3xl font-serif font-bold text-slate-900 group-hover:text-rose-700 transition-colors">{formatCurrency(stats.totalOut)}</p>
              </div>
-             <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                <p className="text-sm font-medium text-slate-500 mb-1">Resultado Líquido</p>
-                <p className={`text-2xl font-bold ${stats.net >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+             
+             <div className={`bg-white p-8 rounded-xl border shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)] transition-colors group ${stats.net >= 0 ? 'border-emerald-100 bg-emerald-50/10' : 'border-rose-100 bg-rose-50/10'}`}>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Resultado Líquido</p>
+                <p className={`text-3xl font-serif font-bold ${stats.net >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
                   {formatCurrency(stats.net)}
                 </p>
              </div>
-             <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                <p className="text-sm font-medium text-slate-500 mb-1">Passivo/Dívida Total</p>
-                <p className="text-2xl font-bold text-slate-900">{formatCurrency(stats.totalDebt)}</p>
+             
+             <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)] group">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Passivo Total (Dívida)</p>
+                <p className="text-3xl font-serif font-bold text-slate-900">{formatCurrency(stats.totalDebt)}</p>
              </div>
           </div>
 
           {!hasData && (
-            <div className="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-8 text-center">
-              <p className="text-slate-500 mb-4">Ainda não há dados financeiros importados para este cliente.</p>
+            <div className="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-12 text-center">
+              <p className="text-slate-500 mb-6 font-medium">Ainda não há dados financeiros importados para este cliente.</p>
               <button 
                 onClick={() => navigate('import')}
-                className="bg-slate-900 text-white px-6 py-2 rounded-lg font-medium hover:bg-slate-800 transition-colors"
+                className="bg-[#0f172a] text-white px-8 py-3 rounded-lg font-bold text-sm tracking-wide hover:bg-slate-800 transition-colors shadow-lg"
               >
-                Iniciar Importação
+                INICIAR IMPORTAÇÃO
               </button>
             </div>
           )}
@@ -118,58 +130,55 @@ export const Overview = () => {
 
         {/* Right Column: Actions & Shortcuts */}
         <div className="space-y-6">
-          <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-            <PieChart size={20} className="text-slate-500" />
-            Ações Rápidas
+          <h3 className="text-lg font-bold text-slate-900 flex items-center gap-3 pb-4 border-b border-slate-200 font-serif uppercase tracking-wider text-sm">
+            Navegação Rápida
           </h3>
 
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden divide-y divide-slate-100">
-            <button onClick={() => navigate('import')} className="w-full text-left p-4 hover:bg-slate-50 transition-colors flex items-center justify-between group">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-slate-100 text-slate-600 rounded-lg group-hover:bg-slate-200 transition-colors"><Upload size={18} /></div>
-                <div>
-                  <p className="font-bold text-slate-900 text-sm">Importar Extratos</p>
-                  <p className="text-xs text-slate-500">Adicionar novos dados bancários</p>
-                </div>
-              </div>
-              <ArrowRight size={16} className="text-slate-300 group-hover:text-slate-600 transition-colors" />
-            </button>
-
-            <button onClick={() => navigate('debts')} className="w-full text-left p-4 hover:bg-slate-50 transition-colors flex items-center justify-between group">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-rose-50 text-rose-600 rounded-lg group-hover:bg-rose-100 transition-colors"><CreditCard size={18} /></div>
-                <div>
-                  <p className="font-bold text-slate-900 text-sm">Registrar Dívidas</p>
-                  <p className="text-xs text-slate-500">Gerenciar passivos e empréstimos</p>
-                </div>
-              </div>
-              <ArrowRight size={16} className="text-slate-300 group-hover:text-rose-600 transition-colors" />
-            </button>
-
-            <button onClick={() => navigate('analysis')} className="w-full text-left p-4 hover:bg-slate-50 transition-colors flex items-center justify-between group">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-teal-50 text-teal-600 rounded-lg group-hover:bg-teal-100 transition-colors"><PieChart size={18} /></div>
-                <div>
-                  <p className="font-bold text-slate-900 text-sm">Ver Mapa do Sufoco</p>
-                  <p className="text-xs text-slate-500">Análise de Ralos de Caixa</p>
-                </div>
-              </div>
-              <ArrowRight size={16} className="text-slate-300 group-hover:text-teal-600 transition-colors" />
-            </button>
-            
-            <button onClick={() => navigate('report')} className="w-full text-left p-4 hover:bg-slate-50 transition-colors flex items-center justify-between group">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-slate-100 text-slate-600 rounded-lg group-hover:bg-slate-200 transition-colors"><FileText size={18} /></div>
-                <div>
-                  <p className="font-bold text-slate-900 text-sm">Gerar Relatório PDF</p>
-                  <p className="text-xs text-slate-500">Exportar diagnóstico completo</p>
-                </div>
-              </div>
-              <ArrowRight size={16} className="text-slate-300 group-hover:text-slate-600 transition-colors" />
-            </button>
+            <ActionRow 
+                icon={<Upload size={18} />} 
+                title="Importar Extratos" 
+                desc="Processamento de dados bancários"
+                color="text-slate-600 bg-slate-100"
+                onClick={() => navigate('import')}
+            />
+             <ActionRow 
+                icon={<CreditCard size={18} />} 
+                title="Estrutura de Capital" 
+                desc="Gestão de Passivos e Dívidas"
+                color="text-indigo-600 bg-indigo-50"
+                onClick={() => navigate('debts')}
+            />
+             <ActionRow 
+                icon={<TrendingDown size={18} />} 
+                title="Mapa de Ralos (DFC)" 
+                desc="Análise de eficiência de caixa"
+                color="text-rose-600 bg-rose-50"
+                onClick={() => navigate('analysis')}
+            />
+             <ActionRow 
+                icon={<FileText size={18} />} 
+                title="Dossiê Executivo" 
+                desc="Gerar relatório em PDF"
+                color="text-teal-600 bg-teal-50"
+                onClick={() => navigate('report')}
+            />
           </div>
         </div>
       </div>
     </div>
   );
 };
+
+const ActionRow = ({ icon, title, desc, color, onClick }: any) => (
+    <button onClick={onClick} className="w-full text-left p-5 hover:bg-slate-50 transition-colors flex items-center justify-between group">
+        <div className="flex items-center gap-4">
+        <div className={`p-2.5 rounded-lg transition-colors ${color}`}>{icon}</div>
+        <div>
+            <p className="font-bold text-slate-900 text-sm">{title}</p>
+            <p className="text-xs text-slate-500">{desc}</p>
+        </div>
+        </div>
+        <ArrowRight size={16} className="text-slate-300 group-hover:text-slate-800 transition-colors" />
+    </button>
+);

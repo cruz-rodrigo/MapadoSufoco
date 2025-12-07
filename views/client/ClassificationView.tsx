@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { Client, Category, Transaction } from '../../types';
 import { useData } from '../../context/DataContext';
-import { formatCurrency, INFLOW_CATEGORIES, OUTFLOW_CATEGORIES } from '../../constants';
+import { formatCurrency, INFLOW_CATEGORIES, OUTFLOW_CATEGORIES, CATEGORY_GROUPS } from '../../constants';
 import { Wand2, AlertTriangle, Check, ArrowDown, ArrowUp, Filter, CheckSquare, Square, Layers } from 'lucide-react';
 
 export const ClassificationView = () => {
@@ -132,12 +132,19 @@ export const ClassificationView = () => {
                     value=""
                  >
                    <option value="" disabled>Aplicar em massa...</option>
-                   <optgroup label="Saídas">
-                     {OUTFLOW_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                   </optgroup>
-                   <optgroup label="Entradas">
-                     {INFLOW_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                   </optgroup>
+                   <option value={Category.UNCATEGORIZED}>{Category.UNCATEGORIZED}</option>
+                   
+                   {/* Render OptGroups for Bulk Action too */}
+                   {Object.entries(CATEGORY_GROUPS.OUTFLOW).map(([group, cats]) => (
+                      <optgroup key={group} label={group}>
+                        {cats.map(c => <option key={c} value={c}>{c}</option>)}
+                      </optgroup>
+                   ))}
+                   {Object.entries(CATEGORY_GROUPS.INFLOW).map(([group, cats]) => (
+                      <optgroup key={group} label={group}>
+                        {cats.map(c => <option key={c} value={c}>{c}</option>)}
+                      </optgroup>
+                   ))}
                  </select>
                </div>
              </div>
@@ -191,7 +198,8 @@ const TransactionRow: React.FC<{
   onUpdate: (c: Category) => void 
 }> = ({ transaction, isSelected, onToggle, onUpdate }) => {
   const isPending = transaction.category === Category.UNCATEGORIZED;
-  const categories = transaction.type === 'IN' ? INFLOW_CATEGORIES : OUTFLOW_CATEGORIES;
+  // Use groups to render organized dropdown
+  const groups = transaction.type === 'IN' ? CATEGORY_GROUPS.INFLOW : CATEGORY_GROUPS.OUTFLOW;
 
   return (
     <tr className={`hover:bg-slate-50 transition-colors group ${isPending ? 'bg-amber-50/30' : ''} ${isSelected ? 'bg-teal-50/50' : ''}`}>
@@ -230,8 +238,16 @@ const TransactionRow: React.FC<{
                 : 'border-slate-200 text-slate-700 bg-slate-50/50 group-hover:bg-white'}
           `}
         >
-          {categories.map(cat => (
-            <option key={cat} value={cat}>{cat}</option>
+          {/* Always allow undoing to 'A Classificar' */}
+          <option value={Category.UNCATEGORIZED}>{Category.UNCATEGORIZED}</option>
+          <hr />
+          
+          {Object.entries(groups).map(([groupLabel, categories]) => (
+            <optgroup key={groupLabel} label={groupLabel}>
+                {categories.map(cat => (
+                    <option key={cat} value={cat}>{cat}</option>
+                ))}
+            </optgroup>
           ))}
         </select>
       </td>
