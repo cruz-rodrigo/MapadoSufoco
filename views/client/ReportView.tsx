@@ -237,9 +237,9 @@ export const ReportView = () => {
                             
                             {/* VERTICAL ANALYSIS ROW: VARIABLE COST */}
                             <tr className="bg-slate-100 border-b border-slate-200">
-                                <td className="p-2 pl-6 text-slate-500 text-[9px] font-bold italic">% Custos Variáveis</td>
+                                <td className="p-2 pl-6 text-slate-700 text-[9px] font-bold">% Custos Variáveis</td>
                                 {last3MonthsData.map((m, i) => (
-                                    <td key={i} className="p-2 pr-4 text-right text-slate-500 text-[9px] font-bold border-l border-slate-200 font-mono">{m.av_variable.toFixed(1)}%</td>
+                                    <td key={i} className="p-2 pr-4 text-right text-slate-700 text-[9px] font-bold border-l border-slate-200 font-mono">{m.av_variable.toFixed(1)}%</td>
                                 ))}
                             </tr>
 
@@ -258,9 +258,9 @@ export const ReportView = () => {
 
                             {/* VERTICAL ANALYSIS ROW: FIXED COST */}
                             <tr className="bg-slate-100 border-b border-slate-200">
-                                <td className="p-2 pl-6 text-slate-500 text-[9px] font-bold italic">% Despesas Fixas</td>
+                                <td className="p-2 pl-6 text-slate-700 text-[9px] font-bold">% Despesas Fixas</td>
                                 {last3MonthsData.map((m, i) => (
-                                    <td key={i} className="p-2 pr-4 text-right text-slate-500 text-[9px] font-bold border-l border-slate-200 font-mono">{m.av_fixed.toFixed(1)}%</td>
+                                    <td key={i} className="p-2 pr-4 text-right text-slate-700 text-[9px] font-bold border-l border-slate-200 font-mono">{m.av_fixed.toFixed(1)}%</td>
                                 ))}
                             </tr>
 
@@ -284,7 +284,7 @@ export const ReportView = () => {
                             </tr>
                              {/* VERTICAL ANALYSIS ROW: NET MARGIN */}
                             <tr className="bg-slate-100">
-                                <td className="p-2 pl-6 text-slate-500 text-[9px] font-bold italic">% Margem Líquida</td>
+                                <td className="p-2 pl-6 text-slate-700 text-[9px] font-bold">% Margem Líquida</td>
                                 {last3MonthsData.map((m, i) => (
                                     <td key={i} className={`p-2 pr-4 text-right text-[9px] font-bold border-l border-slate-200 font-mono ${m.av_net >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{m.av_net.toFixed(1)}%</td>
                                 ))}
