@@ -9,8 +9,10 @@ import { ImportView } from './views/client/ImportView';
 import { ClassificationView } from './views/client/ClassificationView';
 import { DebtsView } from './views/client/DebtsView';
 import { AnalysisView } from './views/client/AnalysisView';
+import { CashFlowView } from './views/client/CashFlowView';
 import { ProjectionView } from './views/client/ProjectionView';
 import { ReportView } from './views/client/ReportView';
+import { ProblemTreeView } from './views/client/ProblemTreeView';
 
 const App = () => {
   return (
@@ -26,8 +28,10 @@ const App = () => {
               <Route path="classification" element={<ClassificationView />} />
               <Route path="debts" element={<DebtsView />} />
               <Route path="analysis" element={<AnalysisView />} />
+              <Route path="cashflow" element={<CashFlowView />} />
               <Route path="projection" element={<ProjectionView />} />
               <Route path="report" element={<ReportView />} />
+              <Route path="problem-tree" element={<ProblemTreeView />} />
             </Route>
 
           </Routes>

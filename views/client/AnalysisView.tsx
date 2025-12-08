@@ -1,239 +1,338 @@
-import React, { useMemo } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import React, { useMemo, useState, useEffect } from 'react';
+import { useOutletContext, Link } from 'react-router-dom';
 import { Client, Category } from '../../types';
 import { useData } from '../../context/DataContext';
 import { formatCurrency } from '../../constants';
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { AlertTriangle, TrendingDown, ArrowDown, ArrowUp, Zap, Layers, Briefcase, Landmark, Coins } from 'lucide-react';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { Layers, ArrowRight, ShieldAlert, PieChart as PieIcon, ArrowLeftRight, Coins } from 'lucide-react';
 
-export const AnalysisView = () => {
+interface AnalysisViewProps {
+  variant?: 'default' | 'report';
+}
+
+export const AnalysisView: React.FC<AnalysisViewProps> = ({ variant = 'default' }) => {
   const { client } = useOutletContext<{ client: Client }>();
-  const { getTransactionsByClient } = useData();
+  const { getTransactionsByClient, updateClientWorkingCapital } = useData();
 
   const transactions = getTransactionsByClient(client.id);
 
+  // Capital de Giro State - Initialized from Client Data if available
+  const [pmr, setPmr] = useState<number | ''>(client.workingCapitalData?.pmr ?? ''); // Prazo Médio Recebimento
+  const [pmp, setPmp] = useState<number | ''>(client.workingCapitalData?.pmp ?? ''); // Prazo Médio Pagamento
+
+  // Persist changes to Client Data (debounced)
+  useEffect(() => {
+    if (pmr !== '' && pmp !== '') {
+        const handler = setTimeout(() => {
+            updateClientWorkingCapital(client.id, { pmr: Number(pmr), pmp: Number(pmp) });
+        }, 500);
+        return () => clearTimeout(handler);
+    }
+  }, [pmr, pmp, client.id]);
+
   // Core Calculations & DFC Logic
   const analysis = useMemo(() => {
-    // 1. Exclude Internal Transfers
-    const validTransactions = transactions.filter(t => t.category !== Category.TRANSFER);
+    if (transactions.length === 0) return null;
 
-    // 2. Base Totals
-    const totalIn = validTransactions.filter(t => t.type === 'IN').reduce((sum, t) => sum + t.value, 0);
-    const totalOut = validTransactions.filter(t => t.type === 'OUT').reduce((sum, t) => sum + t.value, 0);
-    const net = totalIn - totalOut;
+    const validTxs = transactions.filter(t => t.category !== Category.TRANSFER);
+    
+    // 1. DRE de Caixa Simplificada (Agregados)
+    const totalIn = validTxs.filter(t => t.type === 'IN').reduce((s, t) => s + t.value, 0);
+    const taxesOnSales = validTxs.filter(t => t.category === Category.COST_TAXES_SALES).reduce((s, t) => s + t.value, 0);
+    const cogs = validTxs.filter(t => [Category.COST_GOODS, Category.COST_FREIGHT, Category.COST_COMMISSION].includes(t.category)).reduce((s, t) => s + t.value, 0);
+    
+    const grossMargin = totalIn - taxesOnSales - cogs;
 
-    // 3. DFC Gerencial (Categorização Macro)
-    let flowOperating = 0;
-    let flowInvesting = 0;
-    let flowFinancing = 0;
+    const opex = validTxs.filter(t => t.type === 'OUT' && t.nature === 'OPERATIONAL' && ![Category.COST_GOODS, Category.COST_TAXES_SALES, Category.COST_FREIGHT, Category.COST_COMMISSION].includes(t.category)).reduce((s, t) => s + t.value, 0);
+    
+    const operatingResult = grossMargin - opex;
 
-    validTransactions.forEach(t => {
-       const val = t.type === 'IN' ? t.value : -t.value;
-       
-       if ([Category.REV_ASSET_SALE, Category.OUT_CAPEX].includes(t.category)) {
-           flowInvesting += val;
-       } 
-       else if ([Category.REV_LOAN, Category.REV_CAPITAL, Category.OUT_DEBT_AMORTIZATION, Category.OUT_WITHDRAWAL].includes(t.category)) {
-           flowFinancing += val;
-       } 
-       else {
-           flowOperating += val;
-       }
-    });
+    const financialExpenses = validTxs.filter(t => t.type === 'OUT' && t.nature === 'FINANCING').reduce((s, t) => s + t.value, 0);
+    const investingFlow = validTxs.filter(t => t.type === 'OUT' && t.nature === 'INVESTING').reduce((s, t) => s + t.value, 0); 
+    
+    const netResult = operatingResult - financialExpenses - investingFlow;
 
+    // 2. Fluxo por Natureza (Net)
+    const calcNet = (nature: string) => validTxs.filter(t => t.nature === nature).reduce((acc, t) => acc + (t.type === 'IN' ? t.value : -t.value), 0);
+    const flowOps = calcNet('OPERATIONAL');
+    const flowInv = calcNet('INVESTING');
+    const flowFin = calcNet('FINANCING');
+
+    // 3. Mapa de Ralos (Top 5 Outflows)
+    const totalOut = validTxs.filter(t => t.type === 'OUT').reduce((sum, t) => sum + t.value, 0);
     const categoryTotals: Record<string, number> = {};
-    validTransactions.filter(t => t.type === 'OUT').forEach(t => {
+    validTxs.filter(t => t.type === 'OUT').forEach(t => {
       categoryTotals[t.category] = (categoryTotals[t.category] || 0) + t.value;
     });
 
     const categoryData = Object.entries(categoryTotals)
       .map(([name, value]) => ({ 
-          name, 
-          value,
+          name: name.split('(')[0].trim(),
+          fullName: name,
+          value, 
           percent: totalOut > 0 ? value / totalOut : 0
       }))
       .sort((a, b) => b.value - a.value);
 
-    // Filter logic: Top 5 + Material (>10%)
-    const distinctDrains = categoryData.filter((item, index) => {
-        const isTop5 = index < 5;
-        const isMaterial = item.percent > 0.10; 
-        return isTop5 || isMaterial;
-    });
+    const drains = categoryData.slice(0, 5);
+    const drainsConcentration = drains.reduce((acc, curr) => acc + curr.value, 0) / (totalOut || 1);
 
-    const drainsTotal = distinctDrains.reduce((acc, curr) => acc + curr.value, 0);
-    const drainsConcentration = totalOut > 0 ? drainsTotal / totalOut : 0;
+    // 4. Capital de Giro Calculation (Estimate)
+    // Estimate daily averages based on total period (assuming 90 days if not specific, but using totalIn helps scaling)
+    const dailyRevenue = totalIn / 90; 
+    const dailyCogs = cogs / 90; // Using variable costs as proxy for purchases
+    
+    let cycleImpact = 0;
+    let cycleGap = 0;
+
+    if (pmr !== '' && pmp !== '') {
+        cycleGap = Number(pmr) - Number(pmp);
+        // Formula: (Receivables) - (Payables) roughly
+        // Impact = (PMR * DailyRev) - (PMP * DailyCOGS)
+        cycleImpact = (Number(pmr) * dailyRevenue) - (Number(pmp) * dailyCogs);
+    }
 
     return { 
-        totalIn, totalOut, net, 
-        flowOperating, flowInvesting, flowFinancing,
-        categoryData, drains: distinctDrains, drainsConcentration 
+        dre: { totalIn, taxesOnSales, cogs, grossMargin, opex, operatingResult, financialExpenses, netResult },
+        flows: { flowOps, flowInv, flowFin },
+        drains, drainsConcentration, totalOut, categoryData,
+        wc: { dailyRevenue, dailyCogs, cycleGap, cycleImpact }
     };
-  }, [transactions]);
+  }, [transactions, pmr, pmp]);
 
-  const COLORS = ['#e11d48', '#f59e0b', '#0f172a', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1'];
+  // Adjusted Palette for better contrast and professional look
+  const COLORS = ['#ef4444', '#f97316', '#eab308', '#3b82f6', '#6366f1', '#8b5cf6', '#cbd5e1'];
 
-  if (transactions.length === 0) return <div className="p-10 text-center text-slate-500">Sem dados para análise.</div>;
+  if (!analysis) return <div className="p-10 text-center text-slate-500">Sem dados para análise.</div>;
 
-  const CustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) => {
-    const RADIAN = Math.PI / 180;
-    const radius = innerRadius + (outerRadius - innerRadius) * 0.6;
-    const x = cx + radius * Math.cos(-midAngle * RADIAN);
-    const y = cy + radius * Math.sin(-midAngle * RADIAN);
-    return percent > 0.03 ? (
-      <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight="bold" style={{ pointerEvents: 'none', textShadow: '0px 1px 2px rgba(0,0,0,0.5)' }}>
-        {`${(percent * 100).toFixed(0)}%`}
-      </text>
-    ) : null;
-  };
+  // Layout Logic
+  const containerClass = variant === 'report' 
+    ? "grid grid-cols-1 md:grid-cols-2 gap-6" 
+    : "grid grid-cols-1 lg:grid-cols-3 gap-6";
+
+  const dreClass = variant === 'report' ? "md:col-span-2" : "";
 
   return (
     <div className="space-y-8">
       
-      {/* 1. DFC GERENCIAL */}
-      <section className="print:break-inside-avoid">
-          <div className="flex items-center gap-2 mb-4 print:mb-2">
-              <Layers size={20} className="text-slate-400" />
-              <h2 className="text-lg font-bold text-slate-900">Demonstrativo de Fluxo de Caixa (Gerencial)</h2>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 print:grid print:grid-cols-4 print:gap-3">
-              {/* Cards (Keeping simplified structure for brevity, logic same as before) */}
-              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm print:border-slate-300 print:shadow-none print:p-3">
-                  <p className="text-xs font-bold text-slate-500 uppercase">Fluxo Operacional</p>
-                  <p className={`text-xl font-bold mt-1 ${analysis.flowOperating >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatCurrency(analysis.flowOperating)}</p>
-              </div>
-              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm print:border-slate-300 print:shadow-none print:p-3">
-                  <p className="text-xs font-bold text-slate-500 uppercase">Fluxo de Investimento</p>
-                  <p className={`text-xl font-bold mt-1 ${analysis.flowInvesting >= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>{formatCurrency(analysis.flowInvesting)}</p>
-              </div>
-              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm print:border-slate-300 print:shadow-none print:p-3">
-                  <p className="text-xs font-bold text-slate-500 uppercase">Fluxo de Financiamento</p>
-                  <p className={`text-xl font-bold mt-1 ${analysis.flowFinancing >= 0 ? 'text-emerald-600' : 'text-slate-600'}`}>{formatCurrency(analysis.flowFinancing)}</p>
-              </div>
-               <div className={`p-5 rounded-xl border shadow-sm print:border-2 ${analysis.net >= 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200'}`}>
-                   <p className="text-xs font-bold opacity-70 uppercase">Variação Líquida</p>
-                   <p className={`text-2xl font-bold ${analysis.net >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{formatCurrency(analysis.net)}</p>
-              </div>
-          </div>
-      </section>
-
-      {/* 2. Análise Detalhada (Ralos) - FORCED GRID IN PRINT */}
-      <section className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch print:grid print:grid-cols-[40%_60%] print:gap-6 print:items-start print:mt-4 print:break-inside-avoid">
-        
-        {/* Left: Chart */}
-        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col h-full print:border print:border-slate-200 print:shadow-none print:p-0 print:h-auto">
-          <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2 print:mb-2 print:text-sm">
-            Distribuição de Saídas
-          </h3>
-          <div className="flex-1 min-h-[300px] w-full relative print:h-[250px] print:min-h-[250px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={analysis.categoryData}
-                  cx="50%"
-                  cy="45%" 
-                  innerRadius={50}
-                  outerRadius={80} 
-                  paddingAngle={2}
-                  dataKey="value"
-                  labelLine={false}
-                  label={CustomLabel}
-                  stroke="none"
-                  isAnimationActive={false}
-                >
-                  {analysis.categoryData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Legend 
-                  layout="horizontal" 
-                  verticalAlign="bottom" 
-                  align="center"
-                  iconType="circle" 
-                  wrapperStyle={{ fontSize: '10px', color: '#64748b', paddingTop: '10px', width: '100%' }} 
-                  formatter={(value, entry: any) => {
-                      const { payload } = entry;
-                      const percent = (payload.value / analysis.totalOut) * 100;
-                      const safeName = value.length > 20 ? value.substring(0, 20) + '..' : value;
-                      return <span className="text-slate-600 font-medium ml-1 mr-2">{safeName} ({percent.toFixed(1)}%)</span>;
-                  }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Right: Drains List - REMOVE SCROLL IN PRINT */}
-        <div className="bg-white rounded-xl border border-rose-200 shadow-sm overflow-hidden flex flex-col h-full print:border print:border-rose-200 print:shadow-none print:h-auto print:overflow-visible">
-          <div className="bg-rose-50 px-6 py-4 border-b border-rose-100 flex items-center justify-between shrink-0 print:py-2 print:px-3">
-            <div className="flex items-center gap-3">
-              <div className="p-1.5 bg-white rounded-lg text-rose-600 shadow-sm border border-rose-100">
-                <TrendingDown size={18} strokeWidth={2.5} />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-rose-950 print:text-xs">Mapa de Ralos do Sufoco</h3>
-                <p className="text-[10px] text-rose-800 opacity-80 uppercase tracking-wide">
-                    Onde o dinheiro está indo
-                </p>
-              </div>
-            </div>
-            <div className="text-right">
-                <span className="text-[10px] block font-bold text-rose-400 uppercase">Concentração</span>
-                <span className="text-lg font-bold text-rose-700 leading-none">
-                    {(analysis.drainsConcentration * 100).toFixed(0)}%
-                </span>
-            </div>
-          </div>
-          
-          {/* Important: overflow-auto on screen, overflow-visible on print */}
-          <div className="divide-y divide-slate-100 flex-1 overflow-auto print:overflow-visible print:block">
-            {analysis.drains.map((item, idx) => {
-               const percentage = item.percent * 100;
-               let badge = null;
-               if (percentage > 15) {
-                   badge = <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-100 text-rose-700 border border-rose-200 uppercase tracking-wider">Crítico</span>
-               } else if (percentage > 10) {
-                   badge = <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-700 border border-amber-200 uppercase tracking-wider">Alerta</span>
-               }
-
-               return (
-                <div key={item.name} className="flex flex-col p-4 hover:bg-slate-50 transition-colors group print:p-2 print:break-inside-avoid">
-                  <div className="flex items-start justify-between mb-2">
-                     <div className="flex items-start gap-3">
-                        <span className={`mt-0.5 w-5 h-5 flex-shrink-0 flex items-center justify-center font-bold rounded text-[10px] shadow-sm ${idx === 0 ? 'bg-rose-600 text-white' : 'bg-white border border-slate-200 text-slate-500'}`}>
-                          {idx + 1}
-                        </span>
-                        <div>
-                            <div className="flex items-center gap-2 mb-0.5">
-                                <h4 className="font-bold text-slate-900 text-xs truncate max-w-[200px] print:max-w-none print:whitespace-normal">{item.name}</h4>
-                                {badge}
+      <div className={containerClass}>
+        {/* COL 1: Mini DRE */}
+        <div className={`bg-white rounded-xl border border-slate-200 shadow-sm p-8 ${dreClass}`}>
+            <h3 className="text-sm font-bold text-slate-500 uppercase tracking-widest mb-6 flex items-center gap-2">
+                <Layers size={16} /> Diagnóstico de Caixa (DFC)
+            </h3>
+            
+            {/* DRE Content */}
+            <div className={`text-sm ${variant === 'report' ? 'grid grid-cols-2 gap-x-12 gap-y-4' : 'flex flex-col gap-4'}`}>
+                {/* Left Column (Inputs) */}
+                <div className="space-y-3">
+                    <DRERow label="Receita Bruta" value={analysis.dre.totalIn} bold color="text-emerald-700" />
+                    <DRERow label="(-) Impostos sobre Vendas" value={analysis.dre.taxesOnSales} color="text-rose-600" />
+                    <DRERow label="(-) Custos Variáveis (CMV)" value={analysis.dre.cogs} color="text-rose-600" />
+                    <div className="border-t border-slate-200 my-1"></div>
+                    <DRERow label="(=) Margem de Contribuição" value={analysis.dre.grossMargin} bold />
+                </div>
+                
+                {/* Right Column (Outputs & Result) */}
+                <div className="space-y-3 flex flex-col h-full">
+                    <DRERow label="(-) Despesas Operacionais (OpEx)" value={analysis.dre.opex} color="text-rose-600" />
+                    <div className="border-t border-slate-200 my-1"></div>
+                    <DRERow label="(=) Geração de Caixa Operacional" value={analysis.dre.operatingResult} bold />
+                    <DRERow label="(-) Despesas Financeiras" value={analysis.dre.financialExpenses} color="text-amber-700" />
+                    
+                    {/* For non-report variant, result stays here. For report, it's moved to footer to ensure full width */}
+                    {variant !== 'report' && (
+                        <div className="mt-auto pt-4 border-t-2 border-slate-800">
+                            <div className="flex justify-between items-end gap-2">
+                                <span className="font-bold text-slate-900 text-sm whitespace-nowrap">(=) Resultado Líquido</span>
+                                <span className={`font-bold text-lg whitespace-nowrap ${analysis.dre.netResult >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                    {formatCurrency(analysis.dre.netResult)}
+                                </span>
                             </div>
                         </div>
-                     </div>
-                     <div className="text-right">
-                        <p className="text-sm font-bold text-slate-900">{formatCurrency(item.value)}</p>
-                        <p className="text-xs font-bold text-slate-500">{percentage.toFixed(1)}%</p>
-                     </div>
-                  </div>
-                  <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden print:h-1">
-                    <div 
-                      className={`h-full rounded-full ${percentage > 15 ? 'bg-rose-500' : percentage > 10 ? 'bg-amber-500' : 'bg-slate-400'}`}
-                      style={{ width: `${percentage}%` }}
-                    ></div>
-                  </div>
+                    )}
                 </div>
-              );
-            })}
-          </div>
-          
-          <div className="bg-slate-50 p-4 border-t border-slate-100 shrink-0 print:bg-white print:border-t-2 print:py-2 flex items-start gap-3 print:break-inside-avoid">
-             <Zap size={16} className="text-amber-500 mt-0.5" />
-             <p className="text-xs text-slate-600 leading-relaxed">
-                 <span className="font-bold text-slate-800">Nota do Especialista:</span> As {analysis.drains.length} categorias acima consomem <strong>{(analysis.drainsConcentration * 100).toFixed(0)}%</strong> das saídas.
-             </p>
-          </div>
+            </div>
+
+            {/* FULL WIDTH FOOTER FOR REPORT (Prevents line wrapping) */}
+            {variant === 'report' && (
+                <div className="mt-6 pt-6 border-t-2 border-slate-900">
+                    <div className="flex justify-between items-end">
+                        <span className="font-bold text-slate-900 text-lg uppercase tracking-tight">(=) Resultado Líquido de Caixa</span>
+                        <span className={`font-bold text-2xl font-serif ${analysis.dre.netResult >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                            {formatCurrency(analysis.dre.netResult)}
+                        </span>
+                    </div>
+                </div>
+            )}
         </div>
-      </section>
+
+        {/* COL 2: Fluxos & Capital de Giro */}
+        <div className="space-y-6">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+                <h3 className="text-sm font-bold text-slate-500 uppercase tracking-widest mb-4">Fluxo por Natureza</h3>
+                <div className="space-y-4">
+                    <FlowCard label="Operacional" value={analysis.flows.flowOps} />
+                    <FlowCard label="Investimentos" value={analysis.flows.flowInv} />
+                    <FlowCard label="Financiamento" value={analysis.flows.flowFin} />
+                </div>
+            </div>
+
+            <div className="bg-slate-50 rounded-xl border border-slate-200 p-6">
+                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+                    <ShieldAlert size={14} /> Capital de Giro (Ciclo)
+                </h3>
+                
+                <div className="flex gap-3 mb-4">
+                     <div className="flex-1">
+                        <label className="text-[9px] font-bold uppercase text-slate-400 block mb-1">PMR (Recebimento)</label>
+                        <div className="relative">
+                            <input 
+                                type="number" 
+                                className="w-full bg-white border border-slate-300 rounded px-2 py-1.5 text-sm font-bold text-slate-700 outline-none focus:border-teal-500" 
+                                placeholder="0" 
+                                value={pmr}
+                                onChange={(e) => setPmr(e.target.value === '' ? '' : Number(e.target.value))}
+                            />
+                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-400">dias</span>
+                        </div>
+                     </div>
+                     <div className="flex-1">
+                        <label className="text-[9px] font-bold uppercase text-slate-400 block mb-1">PMP (Pagamento)</label>
+                        <div className="relative">
+                            <input 
+                                type="number" 
+                                className="w-full bg-white border border-slate-300 rounded px-2 py-1.5 text-sm font-bold text-slate-700 outline-none focus:border-teal-500" 
+                                placeholder="0" 
+                                value={pmp}
+                                onChange={(e) => setPmp(e.target.value === '' ? '' : Number(e.target.value))}
+                            />
+                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-400">dias</span>
+                        </div>
+                     </div>
+                </div>
+
+                {/* Calculation Result */}
+                {(pmr !== '' && pmp !== '') && (
+                    <div className="animate-in fade-in slide-in-from-top-2 pt-3 border-t border-slate-200">
+                        <div className="flex justify-between items-center mb-1">
+                            <span className="text-xs text-slate-500 font-medium">Ciclo Financeiro:</span>
+                            <span className={`text-sm font-bold ${analysis.wc.cycleGap > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                                {analysis.wc.cycleGap > 0 ? `+${analysis.wc.cycleGap} dias` : `${analysis.wc.cycleGap} dias`}
+                            </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                            <span className="text-xs text-slate-500 font-medium">Impacto no Caixa:</span>
+                            <span className={`text-sm font-bold ${analysis.wc.cycleImpact > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                                {analysis.wc.cycleImpact > 0 ? '-' : '+'}{formatCurrency(Math.abs(analysis.wc.cycleImpact))}
+                            </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-2 leading-tight">
+                            {analysis.wc.cycleImpact > 0 
+                                ? "Você paga antes de receber. Esse valor fica 'preso' na operação." 
+                                : "Você recebe antes de pagar. Sua operação financia o caixa."}
+                        </p>
+                    </div>
+                )}
+                {(pmr === '' || pmp === '') && (
+                    <p className="text-[10px] text-slate-400 italic">Preencha os prazos médios para calcular a necessidade de capital.</p>
+                )}
+            </div>
+        </div>
+
+        {/* COL 3: Mapa de Ralos (Gráfico) */}
+        <div className={`bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col ${variant === 'report' ? 'print:break-inside-avoid' : 'overflow-hidden'}`}>
+             <div className="bg-slate-50 px-6 py-4 border-b border-slate-100">
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                    <PieIcon size={18} /> Concentração de Saídas
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">Principais categorias de consumo de caixa.</p>
+             </div>
+             
+             {/* Chart Area */}
+             <div className="flex-1 relative min-h-[220px] border-b border-slate-100 py-4">
+                <ResponsiveContainer width="100%" height={220}>
+                    <PieChart>
+                        <Pie 
+                            data={analysis.categoryData} 
+                            cx="50%" 
+                            cy="50%" 
+                            innerRadius={50} 
+                            outerRadius={80} 
+                            dataKey="value"
+                            paddingAngle={2}
+                        >
+                            {analysis.categoryData.map((e, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} strokeWidth={1} />)}
+                        </Pie>
+                        <Tooltip 
+                            formatter={(val: number) => formatCurrency(val)} 
+                            contentStyle={{ fontSize: '12px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} 
+                        />
+                    </PieChart>
+                </ResponsiveContainer>
+                {/* Center Label for Total */}
+                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase block">Total</span>
+                    <span className="text-sm font-bold text-slate-900">{((analysis.drainsConcentration)*100).toFixed(0)}%</span>
+                    <span className="text-[9px] text-slate-400">Top 5</span>
+                </div>
+             </div>
+
+             {/* Custom List/Legend - Adjusted for Print */}
+             <div className={`flex-1 p-4 space-y-3 ${variant === 'report' ? 'print:overflow-visible print:h-auto' : 'overflow-auto'}`}>
+                 {analysis.drains.map((item, idx) => (
+                     <div key={item.name} className="flex justify-between items-center text-sm group hover:bg-slate-50 p-1 rounded transition-colors">
+                         <div className="flex items-center gap-3 truncate max-w-[170px]">
+                            {/* Color Dot */}
+                            <div 
+                                className="w-3 h-3 rounded-full flex-shrink-0" 
+                                style={{ backgroundColor: COLORS[idx % COLORS.length] }} 
+                            />
+                            {/* Show shortened name, but full name on hover */}
+                            <span className="truncate text-slate-600 font-medium" title={item.fullName}>{item.name}</span>
+                         </div>
+                         <div className="text-right flex-shrink-0 ml-2">
+                             <span className="font-bold text-slate-900 block text-xs">{formatCurrency(item.value)}</span>
+                             <span className="text-[10px] text-slate-400 font-mono">{(item.percent * 100).toFixed(1)}%</span>
+                         </div>
+                     </div>
+                 ))}
+             </div>
+             {variant !== 'report' && (
+                 <div className="p-4 bg-slate-50 border-t border-slate-100 text-center">
+                     <Link to={`/client/${client.id}/problem-tree`} className="text-xs font-bold text-teal-700 flex items-center justify-center gap-1 hover:underline">
+                        Criar Plano de Ação <ArrowRight size={12} />
+                     </Link>
+                 </div>
+             )}
+        </div>
+      </div>
+
+       {/* Footer Glossary - Always shown now to satisfy Report requirements, AnalysisView handles layout */}
+       <div className="mt-8 border-t border-slate-200 pt-6 text-slate-400 grid grid-cols-1 md:grid-cols-2 gap-8 text-xs leading-relaxed">
+            <div>
+                <strong className="block text-slate-500 mb-1 uppercase tracking-wider text-[10px]">CMV (Custo de Mercadoria Vendida)</strong>
+                <p>Custos diretos relacionados à produção ou aquisição do que foi vendido. Inclui matéria-prima, produtos para revenda, impostos sobre nota fiscal, comissões e fretes de entrega.</p>
+            </div>
+            <div>
+                <strong className="block text-slate-500 mb-1 uppercase tracking-wider text-[10px]">OpEx (Despesas Operacionais)</strong>
+                <p>Gastos fixos necessários para manter a empresa funcionando, independente de vender ou não. Inclui aluguel, salários administrativos, pro-labore, contador, internet, software, etc.</p>
+            </div>
+       </div>
     </div>
   );
 };
+
+const DRERow = ({ label, value, bold, color, size }: any) => (
+    <div className={`flex justify-between items-center ${bold ? 'font-bold' : 'font-medium'} ${color || 'text-slate-700'} ${size || 'text-sm'}`}>
+        <span>{label}</span>
+        <span>{formatCurrency(value)}</span>
+    </div>
+);
+
+const FlowCard = ({ label, value }: any) => (
+    <div className="flex justify-between items-center p-3 rounded-lg bg-slate-50 border border-slate-100">
+        <span className="text-xs font-bold uppercase text-slate-500">{label}</span>
+        <span className={`font-bold ${value >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{formatCurrency(value)}</span>
+    </div>
+);

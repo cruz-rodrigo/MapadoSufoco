@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { Client, Debt, DebtType } from '../../types';
 import { useData } from '../../context/DataContext';
-import { formatCurrency, formatPercent } from '../../constants';
-import { Plus, Trash2, Landmark, Wallet, Percent, Calendar, AlertTriangle } from 'lucide-react';
+import { formatCurrency, formatPercent, formatCurrencyCompact } from '../../constants';
+import { Plus, Trash2, Wallet, Percent, Calendar, AlertTriangle } from 'lucide-react';
 
 export const DebtsView = () => {
   const { client } = useOutletContext<{ client: Client }>();
@@ -68,7 +68,8 @@ export const DebtsView = () => {
         <SummaryCard 
             icon={<Wallet size={24} />} 
             label="Passivo Total" 
-            value={formatCurrency(totalDebt)} 
+            value={formatCurrencyCompact(totalDebt)}
+            title={formatCurrency(totalDebt)}
         />
         <SummaryCard 
             icon={<Percent size={24} />} 
@@ -180,7 +181,7 @@ export const DebtsView = () => {
 
       {/* Debt Table */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        <table className="w-full text-left print:text-xs">
+        <table className="w-full text-left print:text-[10px] print:leading-tight">
           <thead className="bg-slate-50/80 border-b border-slate-200 print:bg-white print:border-slate-300">
             <tr>
               <th className="px-6 py-5 text-[11px] font-bold text-slate-500 uppercase tracking-widest print:px-2 print:py-2">Instituição</th>
@@ -191,16 +192,16 @@ export const DebtsView = () => {
               <th className="px-6 py-5 text-[11px] font-bold text-slate-500 uppercase tracking-widest print:px-2 print:py-2">Vencimento Final</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 text-sm print:text-xs print:divide-slate-200">
+          <tbody className="divide-y divide-slate-100 text-sm print:text-[10px] print:divide-slate-200">
             {clientDebts.map(debt => (
               <tr key={debt.id} className="hover:bg-slate-50 transition-colors">
-                <td className="px-6 py-4 font-bold text-slate-900 print:px-2 print:py-2">{debt.institution}</td>
+                <td className="px-6 py-4 font-bold text-slate-900 print:px-2 print:py-2 print:break-words">{debt.institution}</td>
                 <td className="px-6 py-4 text-slate-600 print:px-2 print:py-2">
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200 print:bg-transparent print:p-0 print:border-0">
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200 print:bg-transparent print:p-0 print:border-0 print:text-[10px]">
                     {debt.type}
                   </span>
                 </td>
-                <td className="px-6 py-4 text-right font-serif font-bold text-slate-900 text-base print:px-2 print:py-2">{formatCurrency(debt.balance)}</td>
+                <td className="px-6 py-4 text-right font-serif font-bold text-slate-900 text-base print:px-2 print:py-2 print:text-[10px]">{formatCurrency(debt.balance)}</td>
                 <td className="px-6 py-4 text-right font-mono text-slate-500 print:px-2 print:py-2">{debt.monthlyRate.toFixed(2)}%</td>
                 <td className="px-6 py-4 text-right font-serif text-slate-700 print:px-2 print:py-2">{formatCurrency(debt.monthlyPayment || 0)}</td>
                 <td className="px-6 py-4 text-slate-400 font-mono text-xs print:px-2 print:py-2">{debt.dueDate ? new Date(debt.dueDate).toLocaleDateString('pt-BR') : '---'}</td>
@@ -218,12 +219,12 @@ export const DebtsView = () => {
   );
 };
 
-const SummaryCard = ({ icon, label, value }: any) => (
-    <div className="bg-white p-6 rounded-xl shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)] border border-slate-100 flex items-center gap-5 print:border print:border-slate-300 print:shadow-none print:p-3">
-        <div className="p-3 bg-slate-50 text-slate-600 rounded-lg border border-slate-100">{icon}</div>
+const SummaryCard = ({ icon, label, value, title }: any) => (
+    <div className="bg-white p-6 rounded-xl shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)] border border-slate-100 flex items-center gap-5 print:border print:border-slate-300 print:shadow-none print:p-3 print:gap-3">
+        <div className="p-3 bg-slate-50 text-slate-600 rounded-lg border border-slate-100 print:p-1">{icon}</div>
         <div>
         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{label}</p>
-        <p className="text-2xl font-serif font-bold text-slate-900 print:text-lg">{value}</p>
+        <p className="text-2xl font-serif font-bold text-slate-900 print:text-base" title={title}>{value}</p>
         </div>
     </div>
 );

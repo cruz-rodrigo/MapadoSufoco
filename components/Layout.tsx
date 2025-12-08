@@ -22,7 +22,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             </div>
             <div className="flex flex-col">
               <span className="font-serif tracking-wide text-lg">Cruz Capital</span>
-              <span className="text-[9px] text-slate-500 font-bold uppercase tracking-[0.2em]">Boutique M&A</span>
+              <span className="text-[9px] text-slate-500 font-bold uppercase tracking-[0.2em]">Engenharia Financeira</span>
             </div>
           </h1>
         </div>

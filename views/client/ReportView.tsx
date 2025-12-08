@@ -1,267 +1,399 @@
-import React, { useState } from 'react';
+import React, { useMemo } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { Client } from '../../types';
+import { Client, Category } from '../../types';
 import { AnalysisView } from './AnalysisView';
 import { ProjectionView } from './ProjectionView';
 import { DebtsView } from './DebtsView';
-import { Printer, TrendingUp, FileSignature, Target, PlusCircle, Lightbulb, Check, ShieldCheck } from 'lucide-react';
+import { useData } from '../../context/DataContext';
+import { Printer, TrendingUp, ShieldCheck, Wallet, AlertTriangle, FileText, ArrowDown, ArrowUp } from 'lucide-react';
+import { formatCurrency, formatCurrencyCompact, CATEGORY_GROUPS } from '../../constants';
+
+const IMPACT_TRANSLATION: Record<string, string> = {
+  HIGH: 'ALTO',
+  MEDIUM: 'MÉDIO',
+  LOW: 'BAIXO'
+};
+
+const HORIZON_TRANSLATION: Record<string, string> = {
+  CURTO: 'CURTO PRAZO',
+  MEDIO: 'MÉDIO PRAZO',
+  LONGO: 'LONGO PRAZO'
+};
 
 export const ReportView = () => {
   const { client } = useOutletContext<{ client: Client }>();
-  const [consultantName, setConsultantName] = useState('Rodrigo Cruz');
+  const { actions, transactions, debts, updateClientNotes } = useData();
   
-  const [actionPlan, setActionPlan] = useState<string>(
-    "DIRETRIZES ESTRATÉGICAS - CURTO PRAZO\n\n" +
-    "1. RENEGOCIAÇÃO IMEDIATA\n" +
-    "   Iniciar contato com Banco do Brasil para alongamento do perfil da dívida. Meta: Solicitar carência (standstill) de 6 meses.\n\n" +
-    "2. CORTE DE CUSTOS (CHOQUE DE GESTÃO)\n" +
-    "   Reduzir despesas com Serviços de Terceiros e Marketing em 20% imediatamente para estancar a queima de caixa.\n\n" +
-    "3. GESTÃO DE CAIXA\n" +
-    "   Antecipar recebíveis apenas para cobrir o déficit da semana 2, evitando taxas excessivas de antecipação.\n\n" +
-    "4. OPERACIONAL\n" +
-    "   Revisar precificação dos produtos da Categoria A para melhorar a margem de contribuição."
-  );
+  const clientActions = actions.filter(a => a.clientId === client.id);
+  const clientTxs = transactions.filter(t => t.clientId === client.id);
+  const clientDebts = debts.filter(d => d.clientId === client.id);
 
-  const handlePrint = () => {
-    window.print();
-  };
+  // --- EXECUTIVE SUMMARY CALCULATIONS ---
+  const summary = useMemo(() => {
+      const totalIn = clientTxs.filter(t => t.type === 'IN').reduce((a, b) => a + b.value, 0);
+      const totalOut = clientTxs.filter(t => t.type === 'OUT').reduce((a, b) => a + b.value, 0);
+      const estimatedBalance = Math.max(0, totalIn - totalOut); 
+      const totalDebt = clientDebts.reduce((a, b) => a + b.balance, 0);
+      
+      return { totalIn, totalOut, estimatedBalance, totalDebt };
+  }, [clientTxs, clientDebts]);
 
-  const suggestions = [
-    {
-        label: "Aumentar Lucro / Receita",
-        color: "text-emerald-800 bg-emerald-50 border-emerald-200",
-        items: [
-            "Reajustar preços conforme inflação (Repasse de Custos)",
-            "Aumentar venda de produtos com maior margem (Mix)",
-            "Explorar novos canais de vendas (Parcerias)",
-            "Criar política de upsell para clientes atuais"
-        ]
-    },
-    {
-        label: "Reduzir Gastos Fixos",
-        color: "text-amber-800 bg-amber-50 border-amber-200",
-        items: [
-            "Identificar e cortar gastos com maiores aumentos recentes",
-            "Retirar gastos em marketing com baixo retorno (ROAS)",
-            "Cancelar assinaturas e serviços pouco utilizados",
-            "Renegociar aluguel e contratos de longo prazo"
-        ]
-    },
-    {
-        label: "Gestão de Caixa & Dívida",
-        color: "text-indigo-800 bg-indigo-50 border-indigo-200",
-        items: [
-            "Solicitar carência (suspensão) de 6 meses nos empréstimos",
-            "Vender ativos imobilizados ociosos para gerar caixa",
-            "Alterar data de pagamento de fornecedores (Alongamento)",
-            "Antecipar recebíveis pontualmente para cobrir rupturas"
-        ]
-    }
-  ];
+  // --- 3 MONTH COMPARATIVE LOGIC ---
+  const last3MonthsData = useMemo(() => {
+    const months: Record<string, any> = {};
+    
+    // Group
+    clientTxs.forEach(t => {
+        if (t.category === Category.UNCATEGORIZED || t.category === Category.TRANSFER) return;
+        const key = t.date.substring(0, 7); // YYYY-MM
+        if (!months[key]) {
+            months[key] = { revenue: 0, variable: 0, fixed: 0, financial: 0, investments: 0 };
+        }
+        
+        // Sum based on groups
+        const cat = t.category;
+        const val = t.value;
 
-  const addSuggestion = (text: string) => {
-      if (actionPlan.includes(text)) {
-          return;
-      }
-      setActionPlan(prev => prev + `\n\n• ${text}`);
-  };
+        if (CATEGORY_GROUPS.INFLOW['Receitas Operacionais (Vendas)'].includes(cat) || CATEGORY_GROUPS.INFLOW['Outras Entradas / Financeiro'].includes(cat)) {
+            months[key].revenue += val;
+        } else if (CATEGORY_GROUPS.OUTFLOW['Custos Variáveis (CMV)'].includes(cat)) {
+            months[key].variable += val;
+        } else if (CATEGORY_GROUPS.OUTFLOW['Despesas Fixas (OpEx)'].includes(cat)) {
+            months[key].fixed += val;
+        } else if (CATEGORY_GROUPS.OUTFLOW['Despesas Financeiras'].includes(cat)) {
+            months[key].financial += val;
+        } else if (CATEGORY_GROUPS.OUTFLOW['Não Operacional / Investimentos'].includes(cat)) {
+            months[key].investments += val;
+        }
+    });
+
+    // Sort and Take Last 3
+    const sortedKeys = Object.keys(months).sort().reverse().slice(0, 3).reverse();
+    
+    return sortedKeys.map(key => {
+        const d = months[key];
+        const margin = d.revenue - d.variable;
+        const opResult = margin - d.fixed;
+        const netResult = opResult - d.financial - d.investments;
+        
+        // AV% Calculations
+        const av_variable = d.revenue > 0 ? (d.variable / d.revenue) * 100 : 0;
+        const av_fixed = d.revenue > 0 ? (d.fixed / d.revenue) * 100 : 0;
+        const av_net = d.revenue > 0 ? (netResult / d.revenue) * 100 : 0;
+
+        return {
+            label: new Date(key + '-02').toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }).toUpperCase(),
+            ...d,
+            margin,
+            opResult,
+            netResult,
+            av_variable,
+            av_fixed,
+            av_net
+        };
+    });
+  }, [clientTxs]);
+
+  const handlePrint = () => window.print();
 
   return (
     <div className="max-w-5xl mx-auto pb-20 font-sans text-slate-900">
-      {/* Non-printable controls */}
-      <div className="mb-8 flex justify-between items-center bg-white p-6 rounded-xl border border-slate-200 shadow-sm print:hidden">
+      {/* Controls */}
+      <div className="mb-8 flex flex-col md:flex-row justify-between items-center bg-white p-6 rounded-xl border border-slate-200 shadow-sm print:hidden gap-4">
         <div>
-          <h2 className="font-bold text-slate-900 text-lg">Dossiê de Reestruturação</h2>
-          <p className="text-slate-500 text-sm">Visualize o layout final abaixo. Clique em Imprimir para gerar o PDF.</p>
+          <h2 className="font-bold text-slate-900 text-lg flex items-center gap-2">
+             <FileText size={20} className="text-teal-600" />
+             Dossiê de Diagnóstico & Reestruturação
+          </h2>
+          <p className="text-slate-500 text-sm">Gere o relatório completo para apresentar ao cliente ou bancos.</p>
         </div>
-        <button 
-          onClick={handlePrint}
-          className="flex items-center gap-2 bg-slate-900 text-white px-6 py-3 rounded-lg font-bold hover:bg-slate-800 transition-all shadow-lg hover:shadow-xl transform active:scale-95"
-        >
-          <Printer size={18} />
-          Imprimir / Salvar PDF
+        <button onClick={handlePrint} className="flex items-center gap-2 bg-slate-900 text-white px-6 py-3 rounded-lg font-bold hover:bg-slate-800 shadow-lg transition-all w-full md:w-auto justify-center">
+          <Printer size={18} /> GERAR PDF / IMPRIMIR
         </button>
       </div>
 
-      {/* Printable Area - Simulate A4 Paper on Screen */}
-      <div id="printable-report" className="bg-white shadow-2xl print:shadow-none max-w-[210mm] mx-auto min-h-[297mm] p-0 print:max-w-none print:mx-0 relative overflow-hidden">
+      {/* A4 Container */}
+      <div id="printable-report" className="bg-white shadow-2xl print:shadow-none max-w-[210mm] mx-auto min-h-[297mm] p-0 relative overflow-hidden text-slate-900">
         
-        {/* Background Watermark (Discrete) */}
-        <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-[0.03] z-0 print:opacity-[0.02]">
-             <TrendingUp size={600} />
-        </div>
-
-        {/* 0. Header Premium (Big 4 Style) */}
-        <div className="relative z-10 bg-[#0f172a] text-white px-12 py-10 print:px-8 print:py-6">
-          <div className="flex justify-between items-start border-b border-slate-700 pb-6 mb-6">
-             <div className="flex items-center gap-3">
-                <div className="p-2 bg-teal-600 rounded">
-                    <TrendingUp size={24} className="text-white" />
-                </div>
+        {/* Header */}
+        <div className="bg-[#0f172a] text-white px-10 py-10 print:px-8 print:py-8">
+          <div className="flex justify-between items-start border-b border-slate-700 pb-6 mb-8">
+             <div className="flex items-center gap-4">
+                <div className="p-3 bg-teal-600 rounded-lg"><TrendingUp size={28} className="text-white" /></div>
                 <div>
-                    <h1 className="text-xl font-bold tracking-[0.2em] uppercase text-slate-100">Cruz Capital</h1>
-                    <p className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">Engenharia Financeira & Turnaround</p>
+                    <h1 className="text-2xl font-bold tracking-[0.2em] uppercase text-slate-100 font-serif">Cruz Capital</h1>
+                    <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1">Engenharia Financeira</p>
                 </div>
              </div>
              <div className="text-right">
-                <span className="text-[10px] font-bold bg-slate-800 text-teal-400 px-3 py-1 rounded border border-slate-700 uppercase tracking-widest flex items-center gap-1 justify-end ml-auto w-fit">
-                   <ShieldCheck size={10} />
-                   Estritamente Confidencial
+                <span className="text-[10px] font-bold bg-slate-800 text-teal-400 px-3 py-1.5 rounded border border-slate-700 uppercase tracking-widest flex items-center gap-2 justify-end ml-auto w-fit">
+                   <ShieldCheck size={12} /> Documento Confidencial
                 </span>
              </div>
           </div>
-          
           <div>
-            <h2 className="text-3xl font-serif font-bold text-white mb-2 tracking-tight">Relatório de Viabilidade & Plano de Ação</h2>
+            <h2 className="text-4xl font-serif font-bold text-white mb-6 tracking-tight">Laudo de Viabilidade Financeira</h2>
             <div className="flex justify-between items-end">
                 <div>
-                    <p className="text-slate-400 text-sm mb-1">Empresa Analisada:</p>
-                    <p className="text-xl font-bold text-white">{client.name}</p>
-                    <p className="text-xs text-slate-500 font-mono mt-1">{client.cnpj}</p>
+                    <p className="text-slate-400 text-sm mb-1 uppercase tracking-wide font-bold">Empresa Analisada</p>
+                    <p className="text-2xl font-bold text-white">{client.name}</p>
+                    <p className="text-sm text-slate-500 font-mono mt-1">CNPJ: {client.cnpj} | Setor: {client.sector}</p>
                 </div>
                 <div className="text-right">
-                    <p className="text-slate-400 text-sm mb-1">Data de Emissão:</p>
-                    <p className="text-lg font-bold text-white">{new Date().toLocaleDateString('pt-BR')}</p>
+                    <p className="text-slate-400 text-sm mb-1 uppercase tracking-wide font-bold">Data de Emissão</p>
+                    <p className="text-xl font-bold text-white">{new Date().toLocaleDateString('pt-BR')}</p>
                 </div>
             </div>
           </div>
         </div>
 
-        <div className="relative z-10 px-12 py-8 print:px-8 print:py-6 space-y-10">
-
-            {/* 1. Executive Summary */}
-            <section className="print:break-inside-avoid">
-            <div className="flex items-center gap-3 mb-4 border-b-2 border-slate-900 pb-2">
-                <FileSignature size={22} className="text-slate-900" />
-                <h3 className="text-xl font-bold text-slate-900 uppercase tracking-tight">1. Parecer do Especialista</h3>
-            </div>
+        <div className="px-10 py-8 print:px-8 print:py-8 space-y-10">
             
-            {/* FORCE GRID COLS 3 IN PRINT */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 print:grid print:grid-cols-3">
-                {/* Main Text Area - Span 2 */}
-                <div className="md:col-span-2 print:col-span-2">
-                    <div className="mb-2 flex items-center gap-2 text-slate-500">
-                        <Target size={14} />
-                        <span className="text-xs font-bold uppercase tracking-wider">Diretrizes Estratégicas</span>
-                    </div>
-                    
-                    {/* Screen Version: Textarea */}
-                    <textarea 
-                        value={actionPlan}
-                        onChange={(e) => setActionPlan(e.target.value)}
-                        className="w-full min-h-[450px] p-5 text-sm leading-relaxed text-slate-800 bg-slate-50 border border-slate-200 rounded-sm outline-none focus:ring-1 focus:ring-slate-400 resize-none font-medium print:hidden shadow-inner font-serif"
-                        placeholder="Descreva os passos críticos para a recuperação..."
-                    />
-                    
-                    {/* Print Version: Clean Div */}
-                    <div className="hidden print:block text-sm leading-7 text-justify text-slate-900 font-serif whitespace-pre-wrap">
-                        {actionPlan}
-                    </div>
-                </div>
-
-                {/* Sidebar Info - Span 1 */}
-                <div className="space-y-6 print:col-span-1">
-                    <div className="bg-slate-50 p-6 border border-slate-200 print:border-l-4 print:border-t-0 print:border-b-0 print:border-r-0 print:border-slate-300 print:bg-white print:pl-4 print:p-0">
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Consultor Responsável</p>
-                        
-                        <input 
-                            type="text" 
-                            value={consultantName}
-                            onChange={e => setConsultantName(e.target.value)}
-                            className="block w-full bg-transparent font-bold text-slate-900 outline-none text-base placeholder:text-slate-400 print:hidden border-b border-slate-300 pb-1 mb-1"
-                        />
-                        <p className="hidden print:block font-bold text-slate-900 text-base mb-1">{consultantName}</p>
-                        
-                        <p className="text-xs text-slate-500 uppercase">Consultor Financeiro Sênior</p>
-                        <p className="text-xs text-slate-500 mt-0.5">Cruz Capital</p>
-
-                        <div className="mt-6 pt-4 border-t border-slate-200">
-                            <p className="text-[10px] text-slate-400 italic leading-snug">
-                            "A execução deste plano depende do comprometimento da gestão da empresa com as medidas aqui descritas."
-                            </p>
+            {/* 1. EXECUTIVE SUMMARY */}
+            <section className="avoid-break">
+                <SectionHeader number="1" title="Resumo Executivo" />
+                
+                {/* 2 Cols in Print for ample space */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 print:grid-cols-2 gap-4 mb-3">
+                     <div className="p-4 rounded-xl border bg-slate-50 border-slate-200 flex flex-col justify-between h-28 print:h-auto print:py-5">
+                        <div className="flex items-center gap-2 text-slate-500 mb-2">
+                            <Wallet size={18} />
+                            <span className="text-[10px] font-bold uppercase tracking-widest">Caixa Estimado</span>
                         </div>
+                        <p className="text-2xl font-serif font-bold text-slate-900 truncate whitespace-nowrap" title={formatCurrency(summary.estimatedBalance)}>
+                          {formatCurrencyCompact(summary.estimatedBalance)}
+                        </p>
                     </div>
 
-                    <div className="print:hidden border border-slate-200 rounded-lg overflow-hidden bg-white shadow-sm">
-                        <div className="bg-slate-100 px-4 py-3 border-b border-slate-200 flex items-center gap-2">
-                            <Lightbulb size={16} className="text-amber-600" />
-                            <span className="text-xs font-bold text-slate-700 uppercase">Sugestões de Ação</span>
+                    {/* ENTRADAS / SAIDAS CARD - FIX FOR BREAKING TEXT */}
+                    <div className="p-4 rounded-xl border bg-slate-50 border-slate-200 flex flex-col justify-center h-28 gap-3 print:h-auto print:py-5">
+                         <div className="flex justify-between items-baseline w-full">
+                             <div className="flex items-center gap-1.5 text-slate-500">
+                                <ArrowUp size={14} className="text-emerald-500 shrink-0" />
+                                <span className="text-[9px] font-bold uppercase tracking-widest shrink-0">Entradas</span>
+                            </div>
+                            <span className="text-sm font-bold text-emerald-700 whitespace-nowrap ml-2">{formatCurrencyCompact(summary.totalIn)}</span>
+                         </div>
+                         <div className="w-full h-px bg-slate-200"></div>
+                         <div className="flex justify-between items-baseline w-full">
+                            <div className="flex items-center gap-1.5 text-slate-500">
+                                <ArrowDown size={14} className="text-rose-500 shrink-0" />
+                                <span className="text-[9px] font-bold uppercase tracking-widest shrink-0">Saídas</span>
+                            </div>
+                            <span className="text-sm font-bold text-rose-700 whitespace-nowrap ml-2">{formatCurrencyCompact(summary.totalOut)}</span>
+                         </div>
+                    </div>
+
+                    <div className={`p-4 rounded-xl border flex flex-col justify-between h-28 print:h-auto print:py-5 ${summary.totalDebt > 0 ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'}`}>
+                        <div className="flex items-center gap-2 text-slate-500 mb-2">
+                            <AlertTriangle size={18} />
+                            <span className="text-[10px] font-bold uppercase tracking-widest">Dívida Bancária</span>
                         </div>
-                        
-                        <div className="max-h-[300px] overflow-y-auto p-2 space-y-2 scrollbar-thin">
-                            {suggestions.map((group) => (
-                                <div key={group.label} className="mb-3 last:mb-0">
-                                    <p className={`text-[10px] font-bold uppercase mb-1.5 px-2 py-0.5 rounded w-fit ${group.color}`}>{group.label}</p>
-                                    <div className="space-y-0.5">
-                                        {group.items.map(item => {
-                                            const isAdded = actionPlan.includes(item);
-                                            return (
-                                                <button
-                                                    key={item}
-                                                    onClick={() => addSuggestion(item)}
-                                                    disabled={isAdded}
-                                                    className={`w-full text-left text-[11px] p-2 rounded flex items-start gap-2 transition-all ${isAdded ? 'opacity-40 cursor-not-allowed bg-slate-50' : 'hover:bg-blue-50 cursor-pointer text-slate-700'}`}
-                                                >
-                                                    {isAdded ? <Check size={12} className="mt-0.5 shrink-0 text-emerald-500" /> : <PlusCircle size={12} className="mt-0.5 shrink-0 text-slate-400" />}
-                                                    <span className={isAdded ? 'line-through' : ''}>{item}</span>
-                                                </button>
-                                            )
-                                        })}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
+                        <p className={`text-2xl font-serif font-bold truncate whitespace-nowrap ${summary.totalDebt > 0 ? 'text-rose-700' : 'text-slate-900'}`} title={formatCurrency(summary.totalDebt)}>
+                          {formatCurrencyCompact(summary.totalDebt)}
+                        </p>
+                    </div>
+
+                    <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex flex-col justify-between h-28 print:h-auto print:py-5">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Classificação de Risco</p>
+                        <p className={`text-xl font-bold font-serif whitespace-nowrap ${client.lastRiskLevel === 'HIGH' ? 'text-rose-700' : client.lastRiskLevel === 'MEDIUM' ? 'text-amber-600' : 'text-emerald-700'}`}>
+                            {client.lastRiskLevel === 'HIGH' ? 'ALTO RISCO' : client.lastRiskLevel === 'MEDIUM' ? 'RISCO MÉDIO' : 'BAIXO RISCO'}
+                        </p>
                     </div>
                 </div>
-            </div>
-            </section>
-            
-            <div className="print:block h-px bg-slate-200 w-full my-8 print:my-4"></div>
-
-            {/* 2. Diagnosis (Ralos) */}
-            <section className="avoid-break print:break-inside-avoid">
-                <div className="flex items-center gap-3 mb-6 border-b-2 border-slate-900 pb-2">
-                    <span className="text-xl font-bold text-slate-900 uppercase tracking-tight">2. Diagnóstico de Caixa (DFC)</span>
-                </div>
-                <div className="print:mt-4">
-                    <AnalysisView />
-                </div>
+                <p className="text-[10px] text-slate-400 italic mt-2 leading-relaxed max-w-2xl">
+                    * Os totais referem-se a todo o período de dados importados. O saldo de caixa é uma estimativa contábil. Valores abreviados (k/M) usados para facilitar a leitura.
+                </p>
             </section>
 
-            <div className="print:block h-px bg-slate-200 w-full my-8 print:my-4"></div>
+            <div className="print:block h-px bg-slate-200 w-full my-6"></div>
 
-            {/* 3. Debts Structure */}
-            <section className="avoid-break print:break-inside-avoid">
-                <div className="flex items-center gap-3 mb-6 border-b-2 border-slate-900 pb-2">
-                    <span className="text-xl font-bold text-slate-900 uppercase tracking-tight">3. Estrutura de Capital (Dívidas)</span>
+            {/* 2. 3-MONTH COMPARATIVE */}
+            <section className="avoid-break">
+                <SectionHeader number="2" title="Performance Recente (Últimos 3 Meses)" />
+                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                    <table className="w-full text-xs text-left">
+                        <thead className="bg-slate-100 border-b border-slate-200 text-[10px] text-slate-500 uppercase">
+                            <tr>
+                                <th className="p-3 font-bold tracking-wider">Indicador (DRE Gerencial)</th>
+                                {last3MonthsData.map(m => (
+                                    <th key={m.label} className="p-3 text-right font-bold w-28 border-l border-slate-200 bg-slate-50">{m.label}</th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            <tr className="hover:bg-slate-50">
+                                <td className="p-3 pl-4 font-bold text-slate-700">1. Receita Bruta / Entradas</td>
+                                {last3MonthsData.map((m, i) => (
+                                    <td key={i} className="p-3 pr-4 text-right text-slate-700 border-l border-slate-200 font-mono">{formatCurrency(m.revenue)}</td>
+                                ))}
+                            </tr>
+                            <tr className="hover:bg-slate-50">
+                                <td className="p-3 pl-4 text-rose-700 text-[10px]">(-) Custos Variáveis</td>
+                                {last3MonthsData.map((m, i) => (
+                                    <td key={i} className="p-3 pr-4 text-right text-rose-700 text-[10px] border-l border-slate-200 font-mono">{formatCurrency(m.variable)}</td>
+                                ))}
+                            </tr>
+                            
+                            {/* VERTICAL ANALYSIS ROW: VARIABLE COST */}
+                            <tr className="bg-slate-100 border-b border-slate-200">
+                                <td className="p-2 pl-6 text-slate-500 text-[9px] font-bold italic">% Custos Variáveis</td>
+                                {last3MonthsData.map((m, i) => (
+                                    <td key={i} className="p-2 pr-4 text-right text-slate-500 text-[9px] font-bold border-l border-slate-200 font-mono">{m.av_variable.toFixed(1)}%</td>
+                                ))}
+                            </tr>
+
+                            <tr className="bg-slate-50 font-bold hover:bg-slate-100">
+                                <td className="p-3 pl-4 text-slate-800">2. (=) Margem de Contribuição</td>
+                                {last3MonthsData.map((m, i) => (
+                                    <td key={i} className="p-3 pr-4 text-right text-slate-800 border-l border-slate-200 font-mono">{formatCurrency(m.margin)}</td>
+                                ))}
+                            </tr>
+                            <tr className="hover:bg-slate-50">
+                                <td className="p-3 pl-4 text-rose-700 text-[10px]">(-) Despesas Fixas (OpEx)</td>
+                                {last3MonthsData.map((m, i) => (
+                                    <td key={i} className="p-3 pr-4 text-right text-rose-700 text-[10px] border-l border-slate-200 font-mono">{formatCurrency(m.fixed)}</td>
+                                ))}
+                            </tr>
+
+                            {/* VERTICAL ANALYSIS ROW: FIXED COST */}
+                            <tr className="bg-slate-100 border-b border-slate-200">
+                                <td className="p-2 pl-6 text-slate-500 text-[9px] font-bold italic">% Despesas Fixas</td>
+                                {last3MonthsData.map((m, i) => (
+                                    <td key={i} className="p-2 pr-4 text-right text-slate-500 text-[9px] font-bold border-l border-slate-200 font-mono">{m.av_fixed.toFixed(1)}%</td>
+                                ))}
+                            </tr>
+
+                            <tr className="bg-slate-50 font-bold hover:bg-slate-100">
+                                <td className="p-3 pl-4 text-slate-800">3. (=) Geração de Caixa Operacional</td>
+                                {last3MonthsData.map((m, i) => (
+                                    <td key={i} className="p-3 pr-4 text-right text-slate-800 border-l border-slate-200 font-mono">{formatCurrency(m.opResult)}</td>
+                                ))}
+                            </tr>
+                            <tr className="hover:bg-slate-50">
+                                <td className="p-3 pl-4 text-amber-700 text-[10px]">(-) Serviço da Dívida / Investimentos</td>
+                                {last3MonthsData.map((m, i) => (
+                                    <td key={i} className="p-3 pr-4 text-right text-amber-700 text-[10px] border-l border-slate-200 font-mono">{formatCurrency(m.financial + m.investments)}</td>
+                                ))}
+                            </tr>
+                            <tr className="bg-[#0f172a] text-white font-bold text-sm">
+                                <td className="p-3 pl-4 whitespace-nowrap">4. (=) RESULTADO LÍQUIDO</td>
+                                {last3MonthsData.map((m, i) => (
+                                    <td key={i} className="p-3 pr-4 text-right border-l border-slate-700 font-mono tracking-tight whitespace-nowrap">{formatCurrency(m.netResult)}</td>
+                                ))}
+                            </tr>
+                             {/* VERTICAL ANALYSIS ROW: NET MARGIN */}
+                            <tr className="bg-slate-100">
+                                <td className="p-2 pl-6 text-slate-500 text-[9px] font-bold italic">% Margem Líquida</td>
+                                {last3MonthsData.map((m, i) => (
+                                    <td key={i} className={`p-2 pr-4 text-right text-[9px] font-bold border-l border-slate-200 font-mono ${m.av_net >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{m.av_net.toFixed(1)}%</td>
+                                ))}
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
-                <div className="print:mt-4">
-                    <DebtsView />
-                </div>
+            </section>
+            
+            <div className="print:page-break"></div>
+
+            {/* 3. PROJECTION */}
+            <section className="avoid-break mt-8">
+                <SectionHeader number="3" title="Projeção | Sobrevida de Caixa" />
+                <ProjectionView variant="report" />
+            </section>
+
+            <div className="print:block h-px bg-slate-200 w-full my-6"></div>
+
+            {/* 4. DIAGNOSIS */}
+            <section className="avoid-break">
+                <SectionHeader number="4" title="Diagnóstico Financeiro (DFC)" />
+                <AnalysisView variant="report" />
+                {/* Glossary removed to avoid duplication. AnalysisView now handles it. */}
             </section>
 
             <div className="print:page-break"></div>
 
-            {/* 4. Projection & Risk */}
-            <section className="avoid-break print:mt-8 print:break-inside-avoid">
-                <div className="flex items-center gap-3 mb-6 border-b-2 border-slate-900 pb-2">
-                    <span className="text-xl font-bold text-slate-900 uppercase tracking-tight">4. Projeção de Solvência (30 Dias)</span>
-                </div>
-                <div className="print:mt-4">
-                    <ProjectionView />
+            {/* 5. DEBTS */}
+            <section className="avoid-break mt-8">
+                <SectionHeader number="5" title="Estrutura de Capital (Dívidas)" />
+                <DebtsView />
+            </section>
+
+            <div className="print:block h-px bg-slate-200 w-full my-6"></div>
+
+            {/* 6. ACTION PLAN */}
+            <section className="avoid-break">
+                <SectionHeader number="6" title="Plano de Ação Imediato" />
+                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                    <table className="w-full text-left text-sm">
+                        <thead className="bg-slate-50 border-b border-slate-200">
+                            <tr>
+                                <th className="p-4 font-bold text-slate-500 text-xs uppercase tracking-wider">Ação Estratégica</th>
+                                <th className="p-4 font-bold text-slate-500 text-xs uppercase tracking-wider w-32">Impacto</th>
+                                <th className="p-4 font-bold text-slate-500 text-xs uppercase tracking-wider w-32">Horizonte</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {clientActions.map(action => (
+                                <tr key={action.id} className="hover:bg-slate-50">
+                                    <td className="p-4">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            {action.actionType === 'REV' 
+                                                ? <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-bold uppercase border border-emerald-200">Receita</span> 
+                                                : <span className="text-[10px] bg-rose-100 text-rose-800 px-2 py-0.5 rounded font-bold uppercase border border-rose-200">Custo</span>
+                                            }
+                                            <p className="font-bold text-slate-900">{action.title}</p>
+                                        </div>
+                                        <p className="text-xs text-slate-500 mt-1">{action.description}</p>
+                                    </td>
+                                    <td className="p-4">
+                                        <span className="text-[10px] font-bold bg-slate-100 px-2 py-1 rounded border border-slate-200 uppercase text-slate-600">
+                                            {IMPACT_TRANSLATION[action.impact] || action.impact}
+                                        </span>
+                                    </td>
+                                    <td className="p-4 text-[10px] font-bold text-slate-500 uppercase">
+                                        {HORIZON_TRANSLATION[action.horizon] || action.horizon}
+                                    </td>
+                                </tr>
+                            ))}
+                            {clientActions.length === 0 && <tr><td colSpan={3} className="p-8 text-center text-slate-400 italic">Nenhuma ação mapeada ainda.</td></tr>}
+                        </tbody>
+                    </table>
                 </div>
             </section>
 
+             <div className="mt-8 p-6 bg-slate-50 border border-slate-200 rounded-xl avoid-break shadow-sm">
+                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-widest mb-4 flex items-center gap-2">
+                    <FileText size={16} /> Parecer do Consultor / Ações Urgentes
+                </h4>
+                <div className="print:hidden mb-2">
+                    <textarea 
+                        className="w-full h-40 p-4 border border-slate-300 rounded-lg text-sm text-slate-700 outline-none focus:ring-2 focus:ring-slate-200 transition-all resize-none shadow-inner"
+                        placeholder="Digite aqui o parecer final e as recomendações urgentes. Este texto será impresso no relatório."
+                        value={client.reportNotes || ''}
+                        onChange={(e) => updateClientNotes(client.id, e.target.value)}
+                    />
+                    <p className="text-xs text-slate-400 mt-2 text-right italic">Alterações salvas automaticamente.</p>
+                </div>
+                {/* Print Version: Text only */}
+                <div className="hidden print:block text-sm text-slate-700 whitespace-pre-wrap leading-relaxed font-serif text-justify">
+                    {client.reportNotes || "Nenhum parecer registrado pelo consultor para este período."}
+                </div>
+            </div>
         </div>
-
-        {/* Footer for Print */}
-        <div className="hidden print:flex fixed bottom-0 left-0 w-full justify-between px-12 pb-6 text-[9px] text-slate-400 border-t border-slate-100 pt-2 bg-white z-20">
-           <span>Cruz Capital • Engenharia Financeira</span>
-           <span>Documento gerado em {new Date().toLocaleDateString('pt-BR')} • {client.name}</span>
-           <span>Confidencial</span>
+        
+        <div className="hidden print:flex fixed bottom-0 left-0 w-full justify-between px-10 pb-6 text-[10px] text-slate-400 border-t border-slate-100 pt-4 bg-white z-20">
+           <span className="font-bold tracking-widest uppercase">Cruz Capital • Engenharia Financeira</span>
+           <span>Documento gerado em {new Date().toLocaleDateString('pt-BR')} • Confidencial</span>
         </div>
-
       </div>
     </div>
   );
 };
+
+const SectionHeader = ({ number, title }: any) => (
+    <div className="flex items-center gap-4 mb-6 border-b-2 border-slate-900 pb-3">
+        <span className="w-10 h-10 flex items-center justify-center bg-slate-900 text-white font-serif font-bold text-xl rounded-lg shadow-md">{number}</span>
+        <h3 className="text-2xl font-bold text-slate-900 uppercase tracking-tight">{title}</h3>
+    </div>
+);

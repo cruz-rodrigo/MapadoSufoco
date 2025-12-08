@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { Outlet, useParams, Link, useLocation } from 'react-router-dom';
 import { useData } from '../../context/DataContext';
-import { Upload, ListFilter, CreditCard, PieChart, TrendingUp, FileText, ArrowLeft, LayoutGrid } from 'lucide-react';
+import { Upload, ListFilter, CreditCard, PieChart, TrendingUp, FileText, ArrowLeft, LayoutGrid, Sprout, BarChart3 } from 'lucide-react';
 
 export const ClientLayout = () => {
   const { clientId } = useParams<{ clientId: string }>();
@@ -16,10 +16,12 @@ export const ClientLayout = () => {
     { path: '', label: 'Visão Geral', icon: <LayoutGrid size={18} /> },
     { path: 'import', label: 'Importação', icon: <Upload size={18} /> },
     { path: 'classification', label: 'Classificação', icon: <ListFilter size={18} /> },
-    { path: 'debts', label: 'Dívidas & Passivos', icon: <CreditCard size={18} /> },
-    { path: 'analysis', label: 'Mapa do Sufoco', icon: <PieChart size={18} /> },
-    { path: 'projection', label: 'Projeção 30d', icon: <TrendingUp size={18} /> },
-    { path: 'report', label: 'Relatório PDF', icon: <FileText size={18} /> },
+    { path: 'debts', label: 'Dívidas', icon: <CreditCard size={18} /> },
+    { path: 'analysis', label: 'Diagnóstico de Caixa', icon: <PieChart size={18} /> },
+    { path: 'cashflow', label: 'Fluxo de Caixa', icon: <BarChart3 size={18} /> },
+    { path: 'problem-tree', label: 'Plano de Ação', icon: <Sprout size={18} /> },
+    { path: 'projection', label: 'Projeção (Sufoco)', icon: <TrendingUp size={18} /> },
+    { path: 'report', label: 'Dossiê PDF', icon: <FileText size={18} /> },
   ];
 
   return (
@@ -31,33 +33,26 @@ export const ClientLayout = () => {
         </Link>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-             <div className="w-16 h-16 rounded-xl bg-slate-900 flex items-center justify-center text-white font-bold text-2xl shadow-lg shadow-slate-200">
+             <div className="w-16 h-16 rounded-xl bg-slate-900 flex items-center justify-center text-white font-bold text-2xl shadow-lg shadow-slate-200 font-serif">
                {client.name.charAt(0)}
              </div>
              <div>
-               <h1 className="text-3xl font-bold text-slate-900 tracking-tight">{client.name}</h1>
+               <h1 className="text-3xl font-bold text-slate-900 tracking-tight font-serif">{client.name}</h1>
                <div className="flex items-center gap-3 mt-1">
                  <span className="text-sm text-slate-500 font-medium bg-slate-100 px-2 py-0.5 rounded border border-slate-200">{client.sector}</span>
-                 <span className="text-sm text-slate-400 font-mono">ID: {client.id.toUpperCase()}</span>
+                 <span className="text-sm text-slate-400 font-mono">ID: {client.id.toUpperCase().substring(0,8)}</span>
                </div>
              </div>
-          </div>
-          <div className="hidden md:flex items-center gap-2">
-             <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-100 flex items-center gap-1">
-               <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-               DIAGNÓSTICO ATIVO
-             </span>
           </div>
         </div>
       </div>
 
-      {/* Tabs - Modern Underline Style */}
+      {/* Tabs */}
       <div className="border-b border-slate-200 mb-8 overflow-x-auto print:hidden">
         <nav className="flex space-x-1 min-w-max">
           {tabs.map((tab) => {
             const fullPath = tab.path ? `/client/${clientId}/${tab.path}` : `/client/${clientId}`;
             const isRoot = tab.path === '';
-            // Fix active state logic for root path vs sub-paths
             const isActive = isRoot 
               ? location.pathname === `/client/${clientId}` || location.pathname === `/client/${clientId}/`
               : location.pathname.includes(tab.path);

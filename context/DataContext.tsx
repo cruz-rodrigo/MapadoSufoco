@@ -1,69 +1,87 @@
+
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { Client, Transaction, Debt, Category, ClientStatus } from '../types';
-import { generateMockClients, generateMockDebts, generateMockTransactions } from '../constants';
+import { Client, Transaction, Debt, Category, ClientStatus, RiskLevel, ActionItem, ProjectionData, WorkingCapitalData } from '../types';
+import { generateMockClients, generateMockDebts, generateMockTransactions, CATEGORY_NATURE } from '../constants';
+
+const STORAGE_PREFIX = 'mapaSufoco.v1';
+const STORAGE_KEYS = {
+  clients: `${STORAGE_PREFIX}.clients`,
+  transactions: `${STORAGE_PREFIX}.transactions`,
+  debts: `${STORAGE_PREFIX}.debts`,
+  actions: `${STORAGE_PREFIX}.actions`,
+  schemaVersion: `${STORAGE_PREFIX}.schemaVersion`,
+};
+const CURRENT_SCHEMA_VERSION = 1;
 
 interface DataContextType {
   clients: Client[];
   transactions: Transaction[];
   debts: Debt[];
+  actions: ActionItem[];
+  
   addClient: (client: Client) => void;
-  updateClientStatus: (clientId: string, status: ClientStatus) => void;
-  updateClientProjectionMeta: (clientId: string, risk: 'LOW' | 'MEDIUM' | 'HIGH') => void;
+  updateClientStatus: (clientId: string, overrideStatus?: ClientStatus) => void;
+  updateClientProjectionMeta: (clientId: string, risk: RiskLevel) => void;
+  updateClientProjectionData: (clientId: string, data: ProjectionData) => void;
+  updateClientWorkingCapital: (clientId: string, data: WorkingCapitalData) => void;
+  updateClientNotes: (clientId: string, notes: string) => void;
+  
   addTransactions: (txs: Transaction[]) => void;
   updateTransactionCategory: (txId: string, category: Category) => void;
   bulkUpdateCategory: (txIds: string[], category: Category) => void;
+  applyAutoClassification: (clientId: string) => void;
+  
   addDebt: (debt: Debt) => void;
   removeDebt: (debtId: string) => void;
+  
+  addAction: (action: ActionItem) => void;
+  removeAction: (actionId: string) => void;
+  
   getTransactionsByClient: (clientId: string) => Transaction[];
   getDebtsByClient: (clientId: string) => Debt[];
-  applyAutoClassification: (clientId: string) => void;
-  resetApplication: () => void;
+  getActionsByClient: (clientId: string) => ActionItem[];
+  
+  resetAll: () => void;
   loadDemoData: () => void;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
-const STORAGE_KEY_PREFIX = 'mapaSufoco.v1';
-const STORAGE_KEYS = {
-  clients: `${STORAGE_KEY_PREFIX}.clients`,
-  transactions: `${STORAGE_KEY_PREFIX}.transactions`,
-  debts: `${STORAGE_KEY_PREFIX}.debts`,
-  schemaVersion: `${STORAGE_KEY_PREFIX}.schemaVersion`,
-};
-const CURRENT_SCHEMA_VERSION = 1;
-
 export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [clients, setClients] = useState<Client[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [debts, setDebts] = useState<Debt[]>([]);
+  const [actions, setActions] = useState<ActionItem[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Load from LocalStorage on mount
+  // 1. HYDRATION
   useEffect(() => {
     try {
       const version = localStorage.getItem(STORAGE_KEYS.schemaVersion);
       
-      // Only hydrate if version matches, otherwise we might have breaking changes
       if (version && Number(version) === CURRENT_SCHEMA_VERSION) {
         const storedClients = localStorage.getItem(STORAGE_KEYS.clients);
         const storedTxs = localStorage.getItem(STORAGE_KEYS.transactions);
         const storedDebts = localStorage.getItem(STORAGE_KEYS.debts);
+        const storedActions = localStorage.getItem(STORAGE_KEYS.actions);
 
         if (storedClients) setClients(JSON.parse(storedClients));
         if (storedTxs) setTransactions(JSON.parse(storedTxs));
         if (storedDebts) setDebts(JSON.parse(storedDebts));
+        if (storedActions) setActions(JSON.parse(storedActions));
       } else {
-        // Init version
+        // First Run or Breaking Change
+        Object.values(STORAGE_KEYS).forEach(k => localStorage.removeItem(k));
         localStorage.setItem(STORAGE_KEYS.schemaVersion, String(CURRENT_SCHEMA_VERSION));
       }
       setIsLoaded(true);
     } catch (e) {
-      console.error("Failed to load data from local storage", e);
+      console.error("Storage Error", e);
       setIsLoaded(true);
     }
   }, []);
 
-  // Persistence Effects
+  // 2. PERSISTENCE
   useEffect(() => {
     if (!isLoaded) return;
     localStorage.setItem(STORAGE_KEYS.clients, JSON.stringify(clients));
@@ -78,41 +96,74 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!isLoaded) return;
     localStorage.setItem(STORAGE_KEYS.debts, JSON.stringify(debts));
   }, [debts, isLoaded]);
+  
+  useEffect(() => {
+    if (!isLoaded) return;
+    localStorage.setItem(STORAGE_KEYS.actions, JSON.stringify(actions));
+  }, [actions, isLoaded]);
 
-  // --- Logic Helpers ---
+  // 3. LOGIC HELPERS
+  const recomputeClientStatus = (clientId: string): ClientStatus => {
+    const clientTx = transactions.filter(t => t.clientId === clientId);
+    const clientDebts = debts.filter(d => d.clientId === clientId);
 
-  const checkStatusUpgrade = (clientId: string, currentStatus: ClientStatus, hasTxs: boolean, hasDebts: boolean): ClientStatus => {
-     // Basic Funnel Logic
-     if (currentStatus === 'PROJECAO_CONCLUIDA') return 'PROJECAO_CONCLUIDA';
-     
-     if (hasDebts && currentStatus !== 'DIVIDAS_PREENCHIDAS') return 'DIVIDAS_PREENCHIDAS';
-     
-     // Check classification status
-     const clientTxs = transactions.filter(t => t.clientId === clientId); // NOTE: This uses current state closure
-     const uncategorized = clientTxs.filter(t => t.category === Category.UNCATEGORIZED);
-     
-     if (hasTxs && uncategorized.length === 0 && currentStatus === 'IMPORTADO') return 'CLASSIFICADO';
-     
-     return currentStatus;
-  }
+    if (clientTx.length === 0 && clientDebts.length === 0) return 'SEM_DADOS';
 
-  // --- Actions ---
+    const hasImported = clientTx.length > 0;
+    const hasUncategorized = clientTx.some(t => t.category === Category.UNCATEGORIZED);
+    const hasDebts = clientDebts.length > 0;
+    
+    // Strict rule: If uncategorized, force IMPORTADO status, do not allow 'PROJECAO_CONCLUIDA'
+    if (hasImported && hasUncategorized) return 'IMPORTADO';
 
-  const addClient = (client: Client) => {
-    setClients(prev => [...prev, client]);
+    // Check projection status (preserved if set AND clean data)
+    const client = clients.find(c => c.id === clientId);
+    if (client?.status === 'PROJECAO_CONCLUIDA') return 'PROJECAO_CONCLUIDA';
+
+    if (hasImported && !hasUncategorized && !hasDebts) return 'CLASSIFICADO';
+    if (hasImported && !hasUncategorized && hasDebts) return 'DIVIDAS_PREENCHIDAS';
+
+    return 'SEM_DADOS';
   };
 
-  const updateClientStatus = (clientId: string, status: ClientStatus) => {
-    setClients(prev => prev.map(c => c.id === clientId ? { ...c, status } : c));
+  const updateClientStatus = (clientId: string, overrideStatus?: ClientStatus) => {
+    setClients(prev => prev.map(c => {
+        if (c.id !== clientId) return c;
+        const newStatus = overrideStatus ?? recomputeClientStatus(clientId);
+        return { ...c, status: newStatus };
+    }));
   };
 
-  const updateClientProjectionMeta = (clientId: string, risk: 'LOW' | 'MEDIUM' | 'HIGH') => {
+  const updateClientProjectionMeta = (clientId: string, risk: RiskLevel) => {
     setClients(prev => prev.map(c => c.id === clientId ? { 
         ...c, 
         status: 'PROJECAO_CONCLUIDA',
         lastRiskLevel: risk,
         lastAnalysisAt: new Date().toISOString()
     } : c));
+  };
+
+  const updateClientProjectionData = (clientId: string, data: ProjectionData) => {
+    setClients(prev => prev.map(c => c.id === clientId ? {
+        ...c,
+        projectionData: data
+    } : c));
+  };
+
+  const updateClientWorkingCapital = (clientId: string, data: WorkingCapitalData) => {
+    setClients(prev => prev.map(c => c.id === clientId ? {
+        ...c,
+        workingCapitalData: data
+    } : c));
+  };
+
+  const updateClientNotes = (clientId: string, notes: string) => {
+    setClients(prev => prev.map(c => c.id === clientId ? { ...c, reportNotes: notes } : c));
+  };
+
+  // 4. ACTIONS
+  const addClient = (client: Client) => {
+    setClients(prev => [...prev, client]);
   };
 
   const addTransactions = (txs: Transaction[]) => {
@@ -124,47 +175,47 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const updateTransactionCategory = (txId: string, category: Category) => {
     setTransactions(prev => {
-        const updated = prev.map(t => t.id === txId ? { ...t, category, isAutoCategorized: false } : t);
+        const updated = prev.map(t => {
+            if (t.id !== txId) return t;
+            return { 
+                ...t, 
+                category, 
+                nature: CATEGORY_NATURE[category], 
+                isAutoCategorized: false 
+            };
+        });
         
-        // Check if all categorized for this client to upgrade status
+        // Optimistic status check
         const tx = prev.find(t => t.id === txId);
         if (tx) {
-            const clientTxs = updated.filter(t => t.clientId === tx.clientId);
-            const pending = clientTxs.filter(t => t.category === Category.UNCATEGORIZED);
-            
-            if (pending.length === 0) {
-                 // We need to trigger this update safely. 
-                 // For simplicity in V1, we'll do it via the useEffect on the ClassificationView or here via setClients
-                 setTimeout(() => updateClientStatus(tx.clientId, 'CLASSIFICADO'), 0);
-            }
+           const clientTxs = updated.filter(t => t.clientId === tx.clientId);
+           const pending = clientTxs.filter(t => t.category === Category.UNCATEGORIZED);
+           // Delay to allow state update
+           if (pending.length === 0) {
+                // If clean, we might need to upgrade status, but let's be careful
+                // Use default recompute logic via timeout
+                setTimeout(() => updateClientStatus(tx.clientId), 0);
+           }
         }
         return updated;
     });
   };
 
   const bulkUpdateCategory = (txIds: string[], category: Category) => {
-    setTransactions(prev => {
-        const updated = prev.map(t => txIds.includes(t.id) ? { ...t, category, isAutoCategorized: false } : t);
-        // Status update logic similar to above could be implemented
-        return updated;
-    });
-  };
-
-  const addDebt = (debt: Debt) => {
-    setDebts(prev => [...prev, debt]);
-    updateClientStatus(debt.clientId, 'DIVIDAS_PREENCHIDAS');
-  };
-  
-  const removeDebt = (debtId: string) => {
-    setDebts(prev => prev.filter(d => d.id !== debtId));
-  }
-
-  const getTransactionsByClient = (clientId: string) => {
-    return transactions.filter(t => t.clientId === clientId).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  };
-
-  const getDebtsByClient = (clientId: string) => {
-    return debts.filter(d => d.clientId === clientId);
+    setTransactions(prev => prev.map(t => {
+        if (!txIds.includes(t.id)) return t;
+        return {
+            ...t,
+            category,
+            nature: CATEGORY_NATURE[category],
+            isAutoCategorized: false
+        };
+    }));
+    const sampleId = txIds[0];
+    if (sampleId) {
+        const tx = transactions.find(t => t.id === sampleId);
+        if (tx) setTimeout(() => updateClientStatus(tx.clientId), 500);
+    }
   };
 
   const applyAutoClassification = (clientId: string) => {
@@ -185,52 +236,82 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       else if (desc.includes('TARIFA') || desc.includes('IOF') || desc.includes('CESTA')) newCat = Category.EXP_BANK_FEES;
       else if (desc.includes('RECEBIMENTO') || desc.includes('PIX RECEBIDO') || desc.includes('TED RECEBIDA')) newCat = Category.REV_SALES;
 
-      return { ...t, category: newCat, isAutoCategorized: newCat !== t.category };
+      return { 
+          ...t, 
+          category: newCat, 
+          nature: CATEGORY_NATURE[newCat], 
+          isAutoCategorized: newCat !== t.category 
+      };
     }));
   };
 
-  const resetApplication = () => {
+  const addDebt = (debt: Debt) => {
+    setDebts(prev => [...prev, debt]);
+    updateClientStatus(debt.clientId, 'DIVIDAS_PREENCHIDAS');
+  };
+  
+  const removeDebt = (debtId: string) => {
+    setDebts(prev => prev.filter(d => d.id !== debtId));
+  };
+
+  const addAction = (action: ActionItem) => {
+    setActions(prev => [...prev, action]);
+  };
+
+  const removeAction = (actionId: string) => {
+    setActions(prev => prev.filter(a => a.id !== actionId));
+  };
+
+  const getTransactionsByClient = (clientId: string) => transactions.filter(t => t.clientId === clientId);
+  const getDebtsByClient = (clientId: string) => debts.filter(d => d.clientId === clientId);
+  const getActionsByClient = (clientId: string) => actions.filter(a => a.clientId === clientId);
+
+  const resetAll = () => {
     setClients([]);
     setTransactions([]);
     setDebts([]);
-    localStorage.removeItem(STORAGE_KEYS.clients);
-    localStorage.removeItem(STORAGE_KEYS.transactions);
-    localStorage.removeItem(STORAGE_KEYS.debts);
+    setActions([]);
+    Object.values(STORAGE_KEYS).forEach(k => localStorage.removeItem(k));
     localStorage.setItem(STORAGE_KEYS.schemaVersion, String(CURRENT_SCHEMA_VERSION));
   };
 
   const loadDemoData = () => {
-    const mockClients = generateMockClients().map(c => ({
-        ...c, 
-        status: 'PROJECAO_CONCLUIDA' as ClientStatus,
-        lastAnalysisAt: new Date().toISOString(),
-        lastRiskLevel: 'HIGH' as const
-    }));
+    const mockClients = generateMockClients(); 
+    // Force status to something lower if we want to force classification step
+    // But since mocks have uncategorized items (drain), logic will handle it on next update
+    const clientId = mockClients[0].id;
+    const mockTxs = generateMockTransactions(clientId);
+    const mockDebts = generateMockDebts(clientId);
+    
     setClients(mockClients);
-    if (mockClients.length > 0) {
-        setTransactions(generateMockTransactions(mockClients[0].id));
-        setDebts(generateMockDebts(mockClients[0].id));
-    }
-  }
+    setTransactions(mockTxs);
+    setDebts(mockDebts);
+    
+    setActions([{
+        id: 'act-1', clientId, actionType: 'COST', title: 'Renegociar Banco do Brasil', description: 'Pedir carência de 6 meses', impact: 'HIGH', horizon: 'CURTO'
+    }]);
+
+    // Force check status immediately after load to ensure UI reflects data reality
+    setTimeout(() => {
+        setClients(prev => prev.map(c => {
+             const hasUncat = mockTxs.some(t => t.category === Category.UNCATEGORIZED);
+             if (c.id === clientId && hasUncat) {
+                 return { ...c, status: 'IMPORTADO' };
+             }
+             return c;
+        }));
+    }, 100);
+  };
 
   return (
     <DataContext.Provider value={{
-      clients,
-      transactions,
-      debts,
-      addClient,
-      updateClientStatus,
-      updateClientProjectionMeta,
-      addTransactions,
-      updateTransactionCategory,
-      bulkUpdateCategory,
-      addDebt,
-      removeDebt,
-      getTransactionsByClient,
-      getDebtsByClient,
-      applyAutoClassification,
-      resetApplication,
-      loadDemoData
+      clients, transactions, debts, actions,
+      addClient, updateClientStatus, updateClientProjectionMeta, updateClientProjectionData, updateClientWorkingCapital, updateClientNotes,
+      addTransactions, updateTransactionCategory, bulkUpdateCategory, applyAutoClassification,
+      addDebt, removeDebt,
+      addAction, removeAction,
+      getTransactionsByClient, getDebtsByClient, getActionsByClient,
+      resetAll, loadDemoData
     }}>
       {children}
     </DataContext.Provider>

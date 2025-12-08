@@ -2,16 +2,16 @@ import React, { useState, useMemo } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { Client, Category, Transaction } from '../../types';
 import { useData } from '../../context/DataContext';
-import { formatCurrency, INFLOW_CATEGORIES, OUTFLOW_CATEGORIES, CATEGORY_GROUPS } from '../../constants';
-import { Wand2, AlertTriangle, Check, ArrowDown, ArrowUp, Filter, CheckSquare, Square, Layers } from 'lucide-react';
+import { formatCurrency, CATEGORY_GROUPS } from '../../constants';
+import { Wand2, AlertTriangle, Check, ArrowDown, ArrowUp, CheckSquare, Square, Layers, Filter } from 'lucide-react';
 
 export const ClassificationView = () => {
   const { client } = useOutletContext<{ client: Client }>();
-  const { getTransactionsByClient, updateTransactionCategory, applyAutoClassification, bulkUpdateCategory, updateClientStatus } = useData();
+  const { getTransactionsByClient, updateTransactionCategory, applyAutoClassification, bulkUpdateCategory } = useData();
   
   const transactions = getTransactionsByClient(client.id);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [filterType, setFilterType] = useState<'ALL' | 'PENDING' | 'DONE'>('ALL');
+  const [filterType, setFilterType] = useState<'ALL' | 'PENDING' | 'AUTO'>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
 
   // Filtering Logic
@@ -21,25 +21,17 @@ export const ClassificationView = () => {
       const matchesType = 
         filterType === 'ALL' ? true :
         filterType === 'PENDING' ? t.category === Category.UNCATEGORIZED :
-        t.category !== Category.UNCATEGORIZED;
+        filterType === 'AUTO' ? t.isAutoCategorized : true;
       return matchesSearch && matchesType;
     });
   }, [transactions, searchTerm, filterType]);
 
-  // Stats
   const uncategorizedCount = transactions.filter(t => t.category === Category.UNCATEGORIZED).length;
-  const progress = Math.round(((transactions.length - uncategorizedCount) / transactions.length) * 100) || 0;
+  const progress = transactions.length > 0 ? Math.round(((transactions.length - uncategorizedCount) / transactions.length) * 100) : 0;
 
-  // Effects
-  React.useEffect(() => {
-    if (progress === 100 && transactions.length > 0) {
-      updateClientStatus(client.id, 'CLASSIFICADO');
-    }
-  }, [progress, client.id, transactions.length]);
-
-  // Handlers
   const handleAutoClassify = () => {
     applyAutoClassification(client.id);
+    setFilterType('AUTO');
   };
 
   const toggleSelectAll = () => {
@@ -99,18 +91,10 @@ export const ClassificationView = () => {
         {/* Toolbar */}
         <div className="p-3 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center gap-4 justify-between">
            <div className="flex items-center gap-2">
-              <button 
-                onClick={() => setFilterType('ALL')}
-                className={`px-3 py-1.5 rounded text-xs font-bold transition-colors ${filterType === 'ALL' ? 'bg-slate-800 text-white' : 'bg-white border border-slate-300 text-slate-600'}`}
-              >
-                Todos
-              </button>
-              <button 
-                onClick={() => setFilterType('PENDING')}
-                className={`px-3 py-1.5 rounded text-xs font-bold transition-colors ${filterType === 'PENDING' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-white border border-slate-300 text-slate-600'}`}
-              >
-                Pendentes
-              </button>
+              <button onClick={() => setFilterType('ALL')} className={`px-3 py-1.5 rounded text-xs font-bold transition-colors ${filterType === 'ALL' ? 'bg-slate-800 text-white' : 'bg-white border border-slate-300 text-slate-600'}`}>Todos</button>
+              <button onClick={() => setFilterType('PENDING')} className={`px-3 py-1.5 rounded text-xs font-bold transition-colors ${filterType === 'PENDING' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-white border border-slate-300 text-slate-600'}`}>Pendentes</button>
+              <button onClick={() => setFilterType('AUTO')} className={`px-3 py-1.5 rounded text-xs font-bold transition-colors ${filterType === 'AUTO' ? 'bg-indigo-100 text-indigo-800 border-indigo-200' : 'bg-white border border-slate-300 text-slate-600'}`}>Auto IA</button>
+              
               <div className="h-6 w-px bg-slate-300 mx-2"></div>
               <input 
                 type="text" 
@@ -127,23 +111,14 @@ export const ClassificationView = () => {
                <div className="flex items-center gap-1 bg-white border border-teal-200 rounded-lg px-2 py-1 shadow-sm">
                  <Layers size={14} className="text-teal-600" />
                  <select 
-                    className="text-xs font-bold text-teal-700 bg-transparent outline-none cursor-pointer"
+                    className="text-xs font-bold text-teal-700 bg-transparent outline-none cursor-pointer w-32"
                     onChange={(e) => handleBulkUpdate(e.target.value)}
                     value=""
                  >
-                   <option value="" disabled>Aplicar em massa...</option>
+                   <option value="" disabled>Aplicar...</option>
                    <option value={Category.UNCATEGORIZED}>{Category.UNCATEGORIZED}</option>
-                   
-                   {/* Render OptGroups for Bulk Action too */}
                    {Object.entries(CATEGORY_GROUPS.OUTFLOW).map(([group, cats]) => (
-                      <optgroup key={group} label={group}>
-                        {cats.map(c => <option key={c} value={c}>{c}</option>)}
-                      </optgroup>
-                   ))}
-                   {Object.entries(CATEGORY_GROUPS.INFLOW).map(([group, cats]) => (
-                      <optgroup key={group} label={group}>
-                        {cats.map(c => <option key={c} value={c}>{c}</option>)}
-                      </optgroup>
+                      <optgroup key={group} label={group}>{cats.map(c => <option key={c} value={c}>{c}</option>)}</optgroup>
                    ))}
                  </select>
                </div>
@@ -198,7 +173,6 @@ const TransactionRow: React.FC<{
   onUpdate: (c: Category) => void 
 }> = ({ transaction, isSelected, onToggle, onUpdate }) => {
   const isPending = transaction.category === Category.UNCATEGORIZED;
-  // Use groups to render organized dropdown
   const groups = transaction.type === 'IN' ? CATEGORY_GROUPS.INFLOW : CATEGORY_GROUPS.OUTFLOW;
 
   return (
@@ -233,15 +207,11 @@ const TransactionRow: React.FC<{
           onChange={(e) => onUpdate(e.target.value as Category)}
           className={`
             w-full text-sm border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-teal-500 transition-all cursor-pointer shadow-sm
-            ${isPending 
-                ? 'border-amber-300 text-amber-800 bg-white font-bold ring-2 ring-amber-100' 
-                : 'border-slate-200 text-slate-700 bg-slate-50/50 group-hover:bg-white'}
+            ${isPending ? 'border-amber-300 text-amber-800 bg-white font-bold ring-2 ring-amber-100' : 'border-slate-200 text-slate-700 bg-slate-50/50 group-hover:bg-white'}
           `}
         >
-          {/* Always allow undoing to 'A Classificar' */}
           <option value={Category.UNCATEGORIZED}>{Category.UNCATEGORIZED}</option>
           <hr />
-          
           {Object.entries(groups).map(([groupLabel, categories]) => (
             <optgroup key={groupLabel} label={groupLabel}>
                 {categories.map(cat => (
